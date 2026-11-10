@@ -58,6 +58,9 @@ Local Proton for integration tests on the dev box:
     fails or is reported NOT RUN with the reason. No stubs in `--ignored` tests, no silent skips.
 11. Backups never follow symlinks (prefixes contain `dosdevices/z: -> /`).
 12. No DRM or anti-cheat circumvention.
+13. If a hook or permission check blocks a command, do not route around it with equivalent commands
+    (e.g. commit-tree instead of commit --amend). State the facts the hook asks for and retry, or stop
+    and report.
 
 ## Conventions
 

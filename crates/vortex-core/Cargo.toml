@@ -6,3 +6,7 @@ rust-version.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# temp dir fixtures for source analysis tests
+tempfile = "3"

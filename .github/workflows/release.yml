@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        if: github.ref_type == 'branch'
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # A release-please release, or a manually pushed v* tag. Tags created by release-please with
+  # GITHUB_TOKEN do not trigger tag workflows, hence the release_created output.
+  tag:
+    needs: release-please
+    if: always() && (needs.release-please.outputs.release_created == 'true' || github.ref_type == 'tag')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+      version: ${{ steps.t.outputs.version }}
+    steps:
+      - id: t
+        env:
+          RP_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          tag="${RP_TAG:-$GITHUB_REF_NAME}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  tarball:
+    needs: tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: archlinux:latest
+      options: --init
+    steps:
+      - run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita sqlite
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - run: cargo build --release --locked -p vortex-gtk
+      - run: sh packaging/make-tarball.sh "${{ needs.tag.outputs.version }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tarball
+          path: vortex-*.tar.gz
+
+  deb:
+    needs: tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: debian:trixie
+      options: --init
+    steps:
+      - run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git build-essential pkg-config dpkg-dev libgtk-4-dev libadwaita-1-dev libsqlite3-dev
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - name: Install Rust (trixie's rustc is older than the MSRV)
+        run: |
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - run: cargo install cargo-deb --locked
+      - run: cargo deb -p vortex-gtk --locked --output .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb
+          path: vortex_*.deb
+
+  rpm:
+    needs: tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: fedora:latest
+      options: --init
+    steps:
+      - run: dnf install -y git gcc pkgconf-pkg-config rust cargo gtk4-devel libadwaita-devel sqlite-devel
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+      - run: cargo install cargo-generate-rpm --locked
+      - run: cargo build --release --locked -p vortex-gtk
+      - run: cargo generate-rpm -p crates/vortex-gtk -o .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rpm
+          path: vortex-*.rpm
+
+  publish:
+    needs: [tag, tarball, deb, rpm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum vortex* > sha256sums.txt && cat sha256sums.txt
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"

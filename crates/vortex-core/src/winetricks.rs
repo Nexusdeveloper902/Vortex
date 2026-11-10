@@ -11,7 +11,8 @@ use crate::paths::{HostPath, Paths, PrefixDir};
 use crate::process::{Exit, RunEvent, RunHandle, RunSpec, Runs};
 use crate::runner::{Invocation, Program, Tools};
 use async_channel::Receiver;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,34 +110,86 @@ pub fn require_support(runtime: &HostPath) -> Result<()> {
     })
 }
 
-/// Runs `umu-run winetricks list-all` (read-only, not recorded as a run) and parses it.
-pub fn list_verbs(tools: &Tools, runtime: &HostPath, prefix: &PrefixDir) -> Result<Vec<Verb>> {
+const LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Per-runtime cache of the verb list (it only changes with the runtime).
+static VERB_CACHE: Mutex<BTreeMap<std::path::PathBuf, Vec<Verb>>> = Mutex::new(BTreeMap::new());
+
+/// Runs `umu-run winetricks list-all` in a throwaway scratch prefix (never a game prefix; not
+/// recorded as a run), with a timeout, and parses it. Results are cached per runtime.
+/// `_prefix` is unused: kept so callers need not change.
+pub fn list_verbs(tools: &Tools, runtime: &HostPath, _prefix: &PrefixDir) -> Result<Vec<Verb>> {
     require_support(runtime)?;
-    let cwd = prefix
-        .as_path()
-        .parent()
-        .map(HostPath::new)
-        .transpose()?
-        .unwrap_or_else(|| prefix.as_host().clone());
+    let key = runtime.as_path().to_path_buf();
+    if let Some(v) = VERB_CACHE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&key)
+    {
+        return Ok(v.clone());
+    }
+    crate::runner::refuse_root()?;
+    let scratch = std::env::temp_dir().join(format!("vortex-list-verbs-{}", std::process::id()));
+    crate::paths::create_private_dir(&scratch)?;
+    let r = list_in(tools, runtime, &scratch);
+    let _ = std::fs::remove_dir_all(&scratch);
+    let verbs = r?;
+    VERB_CACHE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(key, verbs.clone());
+    Ok(verbs)
+}
+
+fn list_in(tools: &Tools, runtime: &HostPath, scratch: &std::path::Path) -> Result<Vec<Verb>> {
+    use std::io::Read;
+    let wp = scratch.join("pfx");
+    std::fs::create_dir_all(&wp).map_err(Error::io(&wp))?;
     let inv = Invocation {
         program: Program::Winetricks,
         args: vec!["list-all".into()],
-        cwd,
-        prefix: prefix.clone(),
+        cwd: HostPath::new(scratch)?,
+        prefix: PrefixDir::new(&wp, Path::new("/nonexistent-home"), &[])?,
         runtime: runtime.clone(),
         env: vec![],
         verbose_log_dir: None,
     };
-    crate::runner::refuse_root()?;
-    let out = inv
+    let mut child = inv
         .command(tools, "vortex-list-verbs")?
-        .output()
+        .spawn()
         .map_err(Error::io(&tools.umu_run))?;
-    let verbs = parse_list_all(&String::from_utf8_lossy(&out.stdout));
+    let drain = |r: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut b = Vec::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_end(&mut b);
+            }
+            b
+        })
+    };
+    let out = drain(child.stdout.take().map(|r| Box::new(r) as _));
+    let err = drain(child.stderr.take().map(|r| Box::new(r) as _));
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().map_err(Error::io(&tools.umu_run))? {
+            break s;
+        }
+        if start.elapsed() > LIST_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Error::Validation("`winetricks list-all` timed out".into()));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let stdout = out.join().unwrap_or_default();
+    let stderr = err.join().unwrap_or_default();
+    let verbs = parse_list_all(&String::from_utf8_lossy(&stdout));
     if verbs.is_empty() {
+        let tail: String = String::from_utf8_lossy(&stderr).chars().take(300).collect();
         return Err(Error::Validation(format!(
-            "`winetricks list-all` produced no verbs (exit {:?})",
-            out.status.code()
+            "`winetricks list-all` produced no verbs (exit {:?}): {}",
+            status.code(),
+            crate::logs::redact(tail.trim())
         )));
     }
     Ok(verbs)

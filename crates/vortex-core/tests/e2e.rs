@@ -781,6 +781,7 @@ fn it_e2e_install_to_launch() {
                 && !it.path.as_path().starts_with(pm.as_path())
         );
     }
+    assert_eq!(plan.items.len(), 1, "{:?}", plan.items);
     assert!(
         plan.items
             .iter()
@@ -882,10 +883,9 @@ fn it_e2e_missing_installer_data() {
 #[test]
 #[ignore = "child process of it_e2e_app_killed_mid_install"]
 fn e2e_child_begins_install() {
-    // A helper, not a test: does nothing unless started by it_e2e_app_killed_mid_install.
-    let Ok(src) = std::env::var(CHILD) else {
-        return;
-    };
+    // A helper, not a test: it must be started by it_e2e_app_killed_mid_install.
+    let src = std::env::var(CHILD)
+        .expect("helper only: run via it_e2e_app_killed_mid_install, which sets CHILD");
     let w = World::new();
     let source = HostPath::new(&src).unwrap();
     let a = analyze(&source).unwrap();

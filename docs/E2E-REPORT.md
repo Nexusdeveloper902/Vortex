@@ -43,6 +43,10 @@ cargo test -p vortex-core --test e2e -- --ignored --nocapture --test-threads=1
 tempdir with `Paths::under`, and only the kill scenario (6) needs the root. The tests need
 `mingw-w64-gcc` and `wixl`. If either is missing they fail, they never skip.
 
+The suite is 3 scenario tests (`it_e2e_install_to_launch`, `it_e2e_missing_installer_data`,
+`it_e2e_app_killed_mid_install`) + 1 child helper (`e2e_child_begins_install`, which panics unless
+spawned by the kill test).
+
 Code: `crates/vortex-core/tests/e2e.rs`, with fixtures in `crates/vortex-core/tests/fixtures/e2e/`:
 
 - `setup.c`: a multi-file installer. It needs `data1.bin`, `data2.bin` and `setup-1.bin` next to it

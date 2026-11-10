@@ -37,18 +37,82 @@ fn no_asset() -> Error {
     Error::Download("no suitable GE-Proton asset in release".into())
 }
 
+const HOSTS: [&str; 4] = [
+    "api.github.com",
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+];
+
+/// HTTPS and an allowlisted host (ARCHITECTURE 11.7). Tests may use plain-HTTP localhost.
+fn check_url(url: &str) -> Result<()> {
+    let uri: ureq::http::Uri = url.parse().map_err(net)?;
+    let host = uri.host().unwrap_or("");
+    let ok = (uri.scheme_str() == Some("https") && HOSTS.contains(&host))
+        || (cfg!(test) && uri.scheme_str() == Some("http") && host == "127.0.0.1");
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::Download(format!(
+            "refusing URL outside allowlist: {url}"
+        )))
+    }
+}
+
+/// Release tags become path components; keep them boring.
+fn check_tag(tag: &str) -> Result<()> {
+    let ok = !tag.is_empty()
+        && tag != "."
+        && tag != ".."
+        && tag
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::Download(format!("invalid release tag {tag:?}")))
+    }
+}
+
+/// GET with redirects followed manually so every hop passes the allowlist.
 fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
-    ureq::get(url)
-        .header("User-Agent", "vortex")
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(net)
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut url = url.to_string();
+    for _ in 0..5 {
+        check_url(&url)?;
+        let resp = agent
+            .get(&url)
+            .header("User-Agent", "vortex")
+            .header("Accept", "application/vnd.github+json")
+            .call()
+            .map_err(net)?;
+        let st = resp.status();
+        if st.is_redirection() {
+            let loc = resp
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .ok_or_else(|| net("redirect without Location"))?;
+            url = loc.to_string();
+            continue;
+        }
+        if !st.is_success() {
+            return Err(net(format!("HTTP {st} from {url}")));
+        }
+        return Ok(resp);
+    }
+    Err(net("too many redirects"))
 }
 
 /// Pick the x86_64 tarball and its `.sha512sum` from a GitHub release JSON.
 pub fn parse_release(json: &[u8]) -> Result<Release> {
     let v: serde_json::Value = serde_json::from_slice(json).map_err(net)?;
     let tag = v["tag_name"].as_str().ok_or_else(no_asset)?.to_string();
+    check_tag(&tag)?;
     let assets: Vec<(&str, &str)> = v["assets"]
         .as_array()
         .into_iter()
@@ -108,6 +172,7 @@ pub fn install(
     progress: &Sender<Progress>,
     cancel: &AtomicBool,
 ) -> Result<HostPath> {
+    check_tag(&release.tag)?;
     fs::create_dir_all(runtimes_dir).map_err(Error::io(runtimes_dir))?;
     let part = runtimes_dir.join(format!(".tmp-{}.part", release.tag));
     let _part = Cleanup(part.clone());
@@ -341,6 +406,42 @@ mod tests {
             "{r:?}"
         );
         assert!(left(&t).is_empty());
+    }
+
+    #[test]
+    fn bad_tags_rejected() {
+        for t in ["", ".", "..", "../x", "a/b", "a b", "x\n"] {
+            assert!(check_tag(t).is_err(), "{t:?}");
+            let j = format!(r#"{{"tag_name":{t:?},"assets":[]}}"#);
+            assert!(parse_release(j.as_bytes()).is_err());
+        }
+        assert!(check_tag("GE-Proton9-9").is_ok());
+        let t = tempfile::tempdir().unwrap();
+        let (tx, _rx) = async_channel::unbounded();
+        let mut r = rel("http://127.0.0.1:1");
+        r.tag = "../evil".into();
+        assert!(install(&r, t.path(), &tx, &AtomicBool::new(false)).is_err());
+    }
+
+    #[test]
+    fn bad_hosts_rejected() {
+        for u in [
+            "http://github.com/x",
+            "https://evil.example/x",
+            "https://github.com.evil.example/x",
+            "https://user@evil.example/x",
+            "ftp://github.com/x",
+            "http://127.0.0.1.evil.example/",
+        ] {
+            assert!(check_url(u).is_err(), "{u}");
+        }
+        for u in [
+            "https://api.github.com/repos/a/b",
+            "https://objects.githubusercontent.com/x",
+            "https://release-assets.githubusercontent.com/x",
+        ] {
+            assert!(check_url(u).is_ok(), "{u}");
+        }
     }
 
     #[test]

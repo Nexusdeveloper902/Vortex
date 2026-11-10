@@ -23,6 +23,9 @@ pub struct DeletionPlan {
     /// Whether the environment row is removed too.
     pub remove_env: bool,
     pub items: Vec<DeletionItem>,
+    /// Existing install dirs Vortex will not delete (outside `data/games`); shown so the user can
+    /// remove them manually.
+    pub manual: Vec<HostPath>,
 }
 
 /// Plan for deleting a game: its managed install dir, and its environment (prefix) when no other
@@ -70,7 +73,12 @@ fn build(db: &Db, paths: &Paths, env_id: EnvId, game_id: Option<i64>) -> Result<
             );
         }
     }
+    for i in db.list_installs()? {
+        protect.extend(canon_opt(Path::new(&i.source_path)));
+        protect.extend(canon_opt(Path::new(&i.installer_path)));
+    }
     let mut items = Vec::new();
+    let mut manual = Vec::new();
     if remove_env && env.prefix_managed {
         let p = Path::new(&env.prefix_path);
         if let Some(c) = managed_item(p, &roots, &protect, true)? {
@@ -79,17 +87,25 @@ fn build(db: &Db, paths: &Paths, env_id: EnvId, game_id: Option<i64>) -> Result<
     }
     if let Some(gid) = game_id {
         let g = db.get_game(gid)?;
-        if let (Some(dir), true) = (&g.install_dir, g.install_dir_managed) {
-            let mut prot = protect.clone();
-            if let Some(i) = db.latest_install_for_game(gid)? {
-                prot.extend(canon_opt(Path::new(&i.source_path)));
-                prot.extend(canon_opt(Path::new(&i.installer_path)));
-            }
-            if let Some(c) = managed_item(Path::new(dir), &roots, &prot, false)? {
-                items.push(c);
+        if let Some(dir) = &g.install_dir {
+            let p = Path::new(dir);
+            let c = fs::canonicalize(p).ok();
+            let owned = g.install_dir_managed
+                && fs::symlink_metadata(p).is_ok_and(|m| !m.is_symlink())
+                && c.as_ref()
+                    .is_some_and(|c| c.starts_with(&roots.games) && *c != roots.games);
+            if owned {
+                if let Some(c) = managed_item(p, &roots, &protect, false)? {
+                    items.push(c);
+                }
+            } else if let Some(c) = c {
+                manual.push(HostPath::new(c)?);
             }
         }
     }
+    // drop items nested under another item (removing the outer one removes them)
+    let snapshot = items.clone();
+    items.retain(|i| !snapshot.iter().any(|o| o != i && i.starts_with(o)));
     let items = items
         .into_iter()
         .map(|c| {
@@ -104,12 +120,14 @@ fn build(db: &Db, paths: &Paths, env_id: EnvId, game_id: Option<i64>) -> Result<
         game_id,
         remove_env,
         items,
+        manual,
     })
 }
 
 struct Roots {
     data: PathBuf,
     prefixes: PathBuf,
+    games: PathBuf,
     home: PathBuf,
 }
 
@@ -119,6 +137,7 @@ impl Roots {
         Ok(Self {
             data: canon(paths.data_dir()),
             prefixes: canon(&paths.prefixes_dir()),
+            games: canon(&paths.games_dir()),
             home: canon(paths.home()),
         })
     }
@@ -150,8 +169,8 @@ fn managed_item(p: &Path, r: &Roots, protect: &[PathBuf], prefix: bool) -> Resul
     if prefix && !in_prefixes {
         return Err(refuse("it is outside the managed prefixes directory"));
     }
-    if !prefix && c.starts_with(&r.data) && !in_prefixes {
-        return Err(refuse("it is inside Vortex's data directory"));
+    if !prefix && !c.starts_with(&r.games) {
+        return Err(refuse("it is outside Vortex's games directory"));
     }
     if let Some(x) = protect
         .iter()
@@ -175,18 +194,53 @@ fn tree_bytes(p: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Removes exactly `plan`. The plan is rebuilt first; if its items differ, nothing is deleted.
+/// Removes exactly `plan`. The plan is rebuilt first; if the rebuilt plan contains anything the
+/// shown plan did not (or the rebuild is refused), nothing is deleted. Items that already vanished
+/// are fine, so a failed execution can be retried.
+///
+/// Order: files first, then database rows. If removing a directory fails, the rows are kept (the
+/// game stays listed, partly deleted) and `execute` can be run again.
 pub fn execute(db: &Db, paths: &Paths, plan: &DeletionPlan) -> Result<()> {
     let fresh = build(db, paths, plan.env_id, plan.game_id)?;
-    let paths_of = |p: &DeletionPlan| p.items.iter().map(|i| i.path.clone()).collect::<Vec<_>>();
-    if paths_of(&fresh) != paths_of(plan) || fresh.remove_env != plan.remove_env {
+    if fresh.remove_env != plan.remove_env
+        || fresh
+            .items
+            .iter()
+            .any(|i| !plan.items.iter().any(|p| p.path == i.path))
+    {
         return Err(Error::Validation(
             "the deletion plan changed; review it again".into(),
         ));
     }
     for it in &plan.items {
+        let p = it.path.as_path();
+        // re-check right before deleting: still a real directory at the planned location
+        match fs::symlink_metadata(p) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return Err(Error::Io {
+                    path: p.to_path_buf(),
+                    source: e,
+                });
+            }
+            Ok(m) if m.is_symlink() || !m.is_dir() => {
+                return Err(Error::Validation(format!(
+                    "refusing to delete {}: it changed since the plan was made",
+                    p.display()
+                )));
+            }
+            Ok(_) => {}
+        }
         // remove_dir_all does not follow symlinks (prefixes contain dosdevices/z: -> /)
-        fs::remove_dir_all(it.path.as_path()).map_err(Error::io(it.path.as_path()))?;
+        match fs::remove_dir_all(p) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(Error::Io {
+                    path: p.to_path_buf(),
+                    source: e,
+                });
+            }
+            _ => {}
+        }
     }
     if let Some(g) = plan.game_id {
         db.delete_game(g)?;

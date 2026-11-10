@@ -2,7 +2,7 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
-use vortex_core::backup::{backup, restore};
+use vortex_core::backup::{backup, restore, restore_limited};
 use vortex_core::db::*;
 use vortex_core::delete::*;
 use vortex_core::error::Error;
@@ -78,7 +78,7 @@ fn restore_needs_confirmation_to_overwrite() {
     assert!(!p.as_path().join("marker").exists());
 }
 
-fn evil_backup(db: &Db, paths: &Paths, entries: &[(&str, bool)]) -> i64 {
+fn evil_backup(db: &Db, paths: &Paths, entries: &[(&str, bool)], mode: u32) -> i64 {
     fs::create_dir_all(paths.backups_dir()).unwrap();
     let path = paths.backups_dir().join("evil.tar.gz");
     let gz = flate2::write::GzEncoder::new(
@@ -95,7 +95,7 @@ fn evil_backup(db: &Db, paths: &Paths, entries: &[(&str, bool)]) -> i64 {
         } else {
             h.set_size(1);
         }
-        h.set_mode(0o644);
+        h.set_mode(mode);
         // write the name bytes directly so '..' and '/' survive
         h.as_old_mut().name[..name.len()].copy_from_slice(name.as_bytes());
         h.set_cksum();
@@ -131,7 +131,7 @@ fn malicious_archives_are_rejected() {
         vec![("lnk", true), ("lnk/pwned", false)],
     ] {
         let (tmp, paths, db) = setup();
-        let id = evil_backup(&db, &paths, &entries);
+        let id = evil_backup(&db, &paths, &entries, 0o644);
         let target = paths.managed_prefix(7).unwrap();
         let r = restore(&db, &paths, id, &target, false);
         assert!(matches!(r, Err(Error::Validation(_))), "{entries:?}: {r:?}");
@@ -219,7 +219,7 @@ fn unmanaged_prefix_is_never_planned_and_shared_env_is_kept() {
     assert!(!plan.remove_env && plan.items.is_empty());
 }
 
-/// Game in a fresh env whose install dir is `dir` (managed).
+/// Game in a fresh env whose install dir is `dir` (flagged managed).
 fn game_with_dir(db: &Db, paths: &Paths, dir: &Path) -> i64 {
     let (env, _) = game(db, paths, "D");
     let mut ng = NewGame::new("D2", env);
@@ -229,47 +229,179 @@ fn game_with_dir(db: &Db, paths: &Paths, dir: &Path) -> i64 {
 }
 
 #[test]
-fn install_dir_rules_and_toctou() {
+fn only_dirs_under_games_root_are_deletable() {
     let (tmp, paths, db) = setup();
-    let src = tmp.path().join("src");
-    fs::create_dir_all(src.join("inst")).unwrap();
-    let inst_dir = tmp.path().join("games/A");
-    fs::create_dir_all(&inst_dir).unwrap();
-    fs::write(inst_dir.join("f"), "1").unwrap();
-    let g = game_with_dir(&db, &paths, &inst_dir);
+    let mine = paths.games_dir().join("A");
+    fs::create_dir_all(&mine).unwrap();
+    let g = game_with_dir(&db, &paths, &mine);
     let plan = plan_game_removal(&db, &paths, g).unwrap();
-    assert_eq!(
-        plan.items.len(),
-        1,
-        "install dir only: env still has game D"
-    );
-    // plan changes between show and execute: abort, nothing deleted
-    fs::write(inst_dir.join("g"), "2").unwrap();
-    fs::remove_dir_all(&inst_dir).unwrap();
-    assert!(execute(&db, &paths, &plan).is_err());
-    // dangerous install dirs are refused
-    fs::create_dir_all(&inst_dir).unwrap();
-    for bad in [
-        Path::new("/"),
+    assert_eq!(plan.items.len(), 1);
+    assert!(plan.manual.is_empty());
+    // everything else, even flagged managed, is manual-only and never planned
+    let docs = tmp.path().join("home/Documents");
+    let child = tmp.path().join("home/Games");
+    let mnt = tmp.path().join("mnt/data");
+    for d in [
+        docs.as_path(),
+        child.as_path(),
+        mnt.as_path(),
         paths.home(),
         paths.data_dir(),
         &paths.backups_dir(),
+        &paths.games_dir(),
+        Path::new("/etc"),
+        Path::new("/"),
     ] {
-        fs::create_dir_all(bad).ok();
-        let g = game_with_dir(&db, &paths, bad);
-        assert!(plan_game_removal(&db, &paths, g).is_err(), "{bad:?}");
+        fs::create_dir_all(d).ok();
+        let g = game_with_dir(&db, &paths, d);
+        let plan = plan_game_removal(&db, &paths, g).unwrap();
+        assert!(plan.items.is_empty(), "{d:?}");
+        assert_eq!(plan.manual.len(), 1, "{d:?}");
+        execute(&db, &paths, &plan).unwrap();
+        assert!(d.exists(), "{d:?} survived");
     }
-    // install dir containing the installer source is refused
-    let g = game_with_dir(&db, &paths, &src);
+}
+
+#[test]
+fn install_dir_inside_prefix_is_manual_and_rerun_is_safe() {
+    let (_t, paths, db) = setup();
+    let (env, g) = game(&db, &paths, "N");
+    let p = paths.managed_prefix(env).unwrap();
+    // install dir under games root, plus a symlink-free nested layout is impossible, so nest by
+    // pointing the install dir inside the prefix is refused as not under games: manual list.
+    let inner = p.as_path().join("drive_c/Games");
+    let mut ng = db.get_game(g).unwrap();
+    ng.install_dir = Some(inner.to_str().unwrap().into());
+    drop(ng);
+    let plan = plan_game_removal(&db, &paths, g).unwrap();
+    execute(&db, &paths, &plan).unwrap();
+    // second execution (retry) of the same plan is idempotent
+    assert!(
+        execute(&db, &paths, &plan).is_err(),
+        "rows gone: game not found"
+    );
+    assert!(!p.as_path().exists());
+}
+
+#[test]
+fn plan_changed_before_execute_aborts() {
+    let (tmp, paths, db) = setup();
+    let (env, g) = game(&db, &paths, "T");
+    let plan = plan_game_removal(&db, &paths, g).unwrap();
+    let p = paths.managed_prefix(env).unwrap();
+    let outside = tmp.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("keep"), "k").unwrap();
+    fs::remove_dir_all(p.as_path()).unwrap();
+    symlink(&outside, p.as_path()).unwrap();
+    assert!(execute(&db, &paths, &plan).is_err());
+    assert!(outside.join("keep").exists());
+    assert!(db.get_game(g).is_ok());
+}
+
+#[test]
+fn every_install_source_is_protected() {
+    let (tmp, paths, db) = setup();
+    let other_src = tmp.path().join("src2");
+    fs::create_dir_all(&other_src).unwrap();
+    let (_e, other) = game(&db, &paths, "O");
     db.insert_install(&NewInstall {
-        game_id: g,
-        source_path: src.join("inst").to_str().unwrap().into(),
+        game_id: other,
+        source_path: other_src.to_str().unwrap().into(),
         source_kind: SourceKind::Dir,
-        installer_path: src.join("inst/setup.exe").to_str().unwrap().into(),
+        installer_path: other_src.join("setup.exe").to_str().unwrap().into(),
     })
     .unwrap();
+    // a games-root install dir that contains another game's installer source
+    let d = paths.games_dir().join("X");
+    fs::create_dir_all(d.join("inst")).unwrap();
+    db.insert_install(&NewInstall {
+        game_id: other,
+        source_path: d.join("inst").to_str().unwrap().into(),
+        source_kind: SourceKind::Dir,
+        installer_path: d.join("inst/setup.exe").to_str().unwrap().into(),
+    })
+    .unwrap();
+    let g = game_with_dir(&db, &paths, &d);
     assert!(plan_game_removal(&db, &paths, g).is_err());
-    assert!(src.join("inst").exists());
+    assert!(d.join("inst").exists());
+}
+
+#[test]
+fn crashed_restore_is_recovered_not_deleted() {
+    let (_t, paths, db) = setup();
+    let (env, _) = game(&db, &paths, "R");
+    let p = paths.managed_prefix(env).unwrap();
+    let b = backup(&db, &paths, env, &AtomicBool::new(false)).unwrap();
+    fs::write(p.as_path().join("mine"), "precious").unwrap();
+    // simulate a crash after the first rename
+    let old = paths.prefixes_dir().join(format!(".old-{}", env));
+    fs::rename(p.as_path(), &old).unwrap();
+    assert!(matches!(
+        restore(&db, &paths, b.id, &p, false),
+        Err(Error::Validation(_))
+    ));
+    assert_eq!(
+        fs::read_to_string(p.as_path().join("mine")).unwrap(),
+        "precious"
+    );
+    restore(&db, &paths, b.id, &p, true).unwrap();
+    assert!(!old.exists());
+}
+
+#[test]
+fn hostile_modes_are_neutralised_and_size_capped() {
+    let (_t, paths, db) = setup();
+    let id = evil_backup(&db, &paths, &[("f", false)], 0o4000);
+    let target = paths.managed_prefix(3).unwrap();
+    restore(&db, &paths, id, &target, false).unwrap();
+    let m = fs::metadata(target.as_path().join("f"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(m & 0o7000, 0);
+    assert_eq!(m & 0o600, 0o600);
+    let t2 = paths.managed_prefix(4).unwrap();
+    let r = restore_limited(&db, &paths, id, &t2, false, 0);
+    assert!(matches!(r, Err(Error::Validation(_))));
+    assert!(!t2.as_path().exists());
+}
+
+#[test]
+fn backup_skips_fifos_and_restore_path_must_not_escape() {
+    let (tmp, paths, db) = setup();
+    let (env, _) = game(&db, &paths, "F");
+    let p = paths.managed_prefix(env).unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(p.as_path().join("pipe"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let b = backup(&db, &paths, env, &AtomicBool::new(false)).unwrap();
+    let t = paths.managed_prefix(50).unwrap();
+    restore(&db, &paths, b.id, &t, false).unwrap();
+    assert!(!t.as_path().join("pipe").exists());
+    assert!(t.as_path().join("version").exists());
+    // archive path with '..' that lexically starts under backups/
+    let evil = paths.backups_dir().join("../../x.tar.gz");
+    fs::copy(&b.archive_path, tmp.path().join("x.tar.gz")).unwrap();
+    let id = db
+        .insert_backup(&NewBackup {
+            environment_id: None,
+            game_name: "e".into(),
+            archive_path: evil.to_str().unwrap().into(),
+            runtime_path: "/rt".into(),
+            prefix_version: None,
+            size_bytes: 1,
+        })
+        .unwrap();
+    let t2 = paths.managed_prefix(51).unwrap();
+    assert!(matches!(
+        restore(&db, &paths, id, &t2, false),
+        Err(Error::InvalidPath(_))
+    ));
 }
 
 #[test]

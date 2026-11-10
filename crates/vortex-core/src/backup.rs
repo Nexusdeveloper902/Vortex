@@ -92,6 +92,10 @@ fn append_tree<W: std::io::Write>(
         let ent = ent.map_err(Error::io(&dir))?;
         let rel = rel.join(ent.file_name());
         let full = root.join(&rel);
+        let ft = ent.file_type().map_err(Error::io(&full))?;
+        if !(ft.is_file() || ft.is_dir() || ft.is_symlink()) {
+            continue; // FIFOs, sockets, devices: restore would reject them
+        }
         b.append_path_with_name(&full, &rel)
             .map_err(Error::io(&full))?;
         if ent.file_type().map_err(Error::io(&full))?.is_dir() {
@@ -112,9 +116,33 @@ pub fn restore(
     target: &PrefixDir,
     confirm_overwrite: bool,
 ) -> Result<()> {
+    restore_limited(
+        db,
+        paths,
+        backup_id,
+        target,
+        confirm_overwrite,
+        MAX_RESTORE_BYTES,
+    )
+}
+
+/// Upper bound on the total size of unpacked file contents (64 GiB).
+pub const MAX_RESTORE_BYTES: u64 = 64 << 30;
+
+/// [`restore`] with an explicit cap on the total unpacked bytes.
+pub fn restore_limited(
+    db: &Db,
+    paths: &Paths,
+    backup_id: i64,
+    target: &PrefixDir,
+    confirm_overwrite: bool,
+    max_bytes: u64,
+) -> Result<()> {
     let b = db.get_backup(backup_id)?;
     let archive = Path::new(&b.archive_path);
-    if !archive.starts_with(paths.backups_dir()) {
+    if !archive.starts_with(paths.backups_dir())
+        || archive.components().any(|c| c == Component::ParentDir)
+    {
         return Err(Error::InvalidPath(format!(
             "{} is outside the backups directory",
             archive.display()
@@ -134,23 +162,31 @@ pub fn restore(
             return Err(Error::Busy(e.id));
         }
     }
-    let exists = fs::symlink_metadata(t).is_ok();
+    create_private_dir(&prefixes)?;
+    // names keyed by target, so a crashed restore can be recovered
+    let tmp = prefixes.join(format!(".restore-{name}"));
+    let old = prefixes.join(format!(".old-{name}"));
+    let live = |p: &Path| fs::symlink_metadata(p).is_ok();
+    if live(&old) && !live(t) {
+        // a previous restore crashed between its two renames: put the user's prefix back
+        fs::rename(&old, t).map_err(Error::io(t))?;
+    }
+    let exists = live(t);
     if exists && !confirm_overwrite {
         return Err(Error::Validation(format!(
             "{} already exists; restoring would overwrite it",
             t.display()
         )));
     }
-    create_private_dir(&prefixes)?;
-    let tmp = prefixes.join(format!(".restore-{backup_id}"));
-    let old = prefixes.join(format!(".old-{backup_id}"));
-    for p in [&tmp, &old] {
-        if fs::symlink_metadata(p).is_ok() {
-            fs::remove_dir_all(p).map_err(Error::io(p))?;
-        }
+    if live(&old) {
+        // target is in place, so this is the leftover of a finished restore
+        fs::remove_dir_all(&old).map_err(Error::io(&old))?;
+    }
+    if live(&tmp) {
+        fs::remove_dir_all(&tmp).map_err(Error::io(&tmp))?;
     }
     fs::create_dir(&tmp).map_err(Error::io(&tmp))?;
-    if let Err(e) = unpack_checked(archive, &tmp) {
+    if let Err(e) = unpack_checked(archive, &tmp, max_bytes) {
         let _ = fs::remove_dir_all(&tmp);
         return Err(e);
     }
@@ -174,15 +210,16 @@ pub fn restore(
         return Err(e);
     }
     if exists {
-        let _ = fs::remove_dir_all(&old);
+        let _ = fs::remove_dir_all(&old); // new prefix is in place; leftovers are retried next time
     }
     Ok(())
 }
 
-fn unpack_checked(archive: &Path, dest: &Path) -> Result<()> {
+fn unpack_checked(archive: &Path, dest: &Path, max_bytes: u64) -> Result<()> {
     let f = fs::File::open(archive).map_err(Error::io(archive))?;
     let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(f));
-    ar.set_preserve_permissions(true);
+    ar.set_preserve_permissions(false);
+    let mut total = 0u64;
     ar.set_unpack_xattrs(false);
     let bad = |p: &Path, why: &str| {
         Error::Validation(format!("unsafe backup entry {}: {why}", p.display()))
@@ -215,9 +252,21 @@ fn unpack_checked(archive: &Path, dest: &Path) -> Result<()> {
         if !(ty.is_file() || ty.is_dir() || ty.is_symlink()) {
             return Err(bad(&path, "unsupported entry type"));
         }
-        // symlink created earlier in this archive at the final component would be replaced, not followed
+        total = total.saturating_add(ent.size());
+        if total > max_bytes {
+            return Err(Error::Validation(format!(
+                "backup unpacks to more than {max_bytes} bytes; refusing"
+            )));
+        }
+        let mode = ent.header().mode().unwrap_or(0o644);
         if !ent.unpack_in(dest).map_err(Error::io(&cur))? {
             return Err(bad(&path, "rejected"));
+        }
+        if !ty.is_symlink() {
+            // no setuid/setgid/sticky; owner can always read, write (and enter dirs)
+            let m = (mode & 0o777) | if ty.is_dir() { 0o700 } else { 0o600 };
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&cur, fs::Permissions::from_mode(m)).map_err(Error::io(&cur))?;
         }
     }
     Ok(())

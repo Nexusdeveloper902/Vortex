@@ -191,6 +191,10 @@ impl Paths {
     pub fn applications_dir(&self) -> &Path {
         &self.applications
     }
+    /// Root of Vortex-owned game install dirs; only dirs strictly under it are ever deletable.
+    pub fn games_dir(&self) -> PathBuf {
+        self.data.join("games")
+    }
     /// The Vortex-managed prefix for an environment: `data/prefixes/<env_id>`.
     pub fn managed_prefix(&self, env: EnvId) -> Result<PrefixDir> {
         PrefixDir::new(self.prefixes_dir().join(env.to_string()), &self.home, &[])

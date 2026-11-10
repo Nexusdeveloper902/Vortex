@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M14 MSI installer: installs MsiGame.exe (game.c) into C:\Program Files\E2E MSI Game -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="E2E MSI Game" Language="1033" Version="1.0.0" Manufacturer="Vortex E2E"
+           UpgradeCode="3e0c6a52-8d1f-4b7a-9c2e-5f4d3b2a1c90">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+    <Media Id="1" Cabinet="game.cab" EmbedCab="yes" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="E2E MSI Game">
+          <Component Id="Game" Guid="8a4b2c1d-7e6f-4a5b-9c8d-1e2f3a4b5c6d">
+            <File Id="MsiGameExe" Name="MsiGame.exe" Source="MsiGame.exe" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="Main" Level="1"><ComponentRef Id="Game" /></Feature>
+  </Product>
+</Wix>

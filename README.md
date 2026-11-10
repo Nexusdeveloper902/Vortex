@@ -28,7 +28,7 @@ Download from the [latest release](https://github.com/Nexusdeveloper902/Vortex/r
 - `.deb`: Debian 13 (trixie) or newer, Ubuntu 25.04 or newer. Older releases ship GTK or libadwaita
   too old (GTK 4.14 and libadwaita 1.6 are required).
 - `.rpm`: Fedora.
-- Arch Linux: build the `vortex-git` package from [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD).
+- Arch Linux: build the `vortex-launcher-git` package from [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD).
 
 `umu-launcher` and `winetricks` are not pulled in by the `.deb`/`.rpm`; install them separately.
 
@@ -95,7 +95,7 @@ cargo tree -p vortex-core -e normal | grep -E 'gtk|glib|gio|adwaita'   # must pr
   `vortex-core`.
 - `crates/vortex-core/tests/`: integration tests, `fake-umu-run`, and fixtures.
 - `spikes/`: throwaway experiments whose results are in `docs/research/`. They are never linked into the app.
-- `packaging/arch/PKGBUILD`: the Arch package `vortex-git`, built from this git repository.
+- `packaging/arch/PKGBUILD`: the Arch package `vortex-launcher-git`, built from this git repository.
 - `data/`: the desktop entry, AppStream metainfo and icons (app id `io.github.nexusdeveloper902.Vortex`).
 
 ## Packaging
@@ -107,7 +107,7 @@ cd packaging/arch
 makepkg -s
 ```
 
-The package installs `/usr/bin/vortex`, the desktop entry, the metainfo file, the icons and the license.
+The package installs `/usr/bin/vortex-launcher`, the desktop entry, the metainfo file, the icons and the license.
 Check the desktop entry and the metainfo with:
 
 ```sh

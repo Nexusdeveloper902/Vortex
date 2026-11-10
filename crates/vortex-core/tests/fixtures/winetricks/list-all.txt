@@ -1,0 +1,11 @@
+===== apps =====
+7zip                    7-zip 9.20 (Igor Pavlov) [downloadable]
+===== dlls =====
+corefonts_fake          not a real verb line kept simple
+vcrun2005               Visual C++ 2005 libraries (mfc80,msvcp80,msvcr80) (Microsoft) [downloadable]
+vcrun2019               Visual C++ 2015-2019 libraries (Microsoft) [downloadable]
+===== fonts =====
+corefonts               MS Arial, Courier, Times fonts [downloadable]
+===== settings =====
+win10                   Set Windows version to Windows 10
+vd=1280x720             Enable virtual desktop

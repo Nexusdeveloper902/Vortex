@@ -130,6 +130,17 @@ pub fn to_host(prefix: &PrefixDir, win: &WinPath) -> Option<HostPath> {
     HostPath::new(p).ok()
 }
 
+/// Creates `dir` (and parents) with mode 0700 and makes sure `dir` itself ends up 0700.
+pub fn create_private_dir(dir: &Path) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(Error::io(dir))?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(Error::io(dir))
+}
+
 /// Managed roots. `from_xdg` for the app, `under(root)` for tests (never touches real XDG dirs).
 #[derive(Debug, Clone)]
 pub struct Paths {

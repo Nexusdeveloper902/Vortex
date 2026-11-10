@@ -182,3 +182,14 @@ fn install_transition_updates_game_atomically_and_queries_work() {
     db.delete_environment(env).unwrap();
     assert!(db.get_backup(b).unwrap().environment_id.is_none());
 }
+
+#[test]
+fn db_and_dirs_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let (paths, db) = open(&tmp);
+    db.set_setting("k", "v").unwrap();
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(paths.data_dir()), 0o700);
+    assert_eq!(mode(&paths.db_file()), 0o600);
+}

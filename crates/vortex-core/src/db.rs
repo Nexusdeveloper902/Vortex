@@ -203,7 +203,20 @@ impl Db {
     /// file to `<db>.bak-v<N>` before migrating an existing non-empty one.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(Error::io(dir))?;
+            crate::paths::create_private_dir(dir)?;
+        }
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            // Pre-create 0600 so SQLite (and its -wal/-shm files, which copy the mode) is private.
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(path)
+                .map_err(Error::io(path))?;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(Error::io(path))?;
         }
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_millis(5000))?;
@@ -231,6 +244,11 @@ impl Db {
             let mut bak = path.as_os_str().to_owned();
             bak.push(format!(".bak-v{found}"));
             std::fs::copy(path, &bak).map_err(Error::io(path))?;
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&bak, std::fs::Permissions::from_mode(0o600))
+                    .map_err(Error::io(&bak))?;
+            }
         }
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(found as usize) {
             let tx = self.conn.transaction()?;

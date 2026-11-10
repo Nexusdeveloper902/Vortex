@@ -5,10 +5,11 @@
 
 use crate::db::RunKind;
 use crate::error::{Error, Result};
-use crate::paths::Paths;
+use crate::paths::{Paths, create_private_dir};
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 const MASK: &str = "<redacted>";
@@ -35,10 +36,19 @@ fn is_name_char(c: char) -> bool {
 }
 
 /// Replaces the byte ranges (sorted, non-overlapping) with the mask.
-fn splice(s: &str, ranges: Vec<(usize, usize)>) -> Cow<'_, str> {
+fn splice(s: &str, mut ranges: Vec<(usize, usize)>) -> Cow<'_, str> {
     if ranges.is_empty() {
         return Cow::Borrowed(s);
     }
+    ranges.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+    for (a, b) in ranges {
+        match merged.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => merged.push((a, b)),
+        }
+    }
+    let ranges = merged;
     let mut out = String::with_capacity(s.len());
     let mut last = 0;
     for (a, b) in ranges {
@@ -56,7 +66,15 @@ fn value_range(s: &str, start: usize) -> (usize, usize) {
     match rest.chars().next() {
         Some(q @ ('\'' | '"')) => {
             let inner = start + 1;
-            let end = s[inner..].find(q).map_or(s.len(), |i| inner + i);
+            let mut esc = false;
+            let end = s[inner..]
+                .char_indices()
+                .find(|&(_, c)| {
+                    let hit = c == q && !esc;
+                    esc = c == '\\' && !esc;
+                    hit
+                })
+                .map_or(s.len(), |(i, _)| inner + i);
             (inner, end)
         }
         _ => (
@@ -74,20 +92,15 @@ fn pairs(s: &str) -> Vec<(usize, usize)> {
         let (name_end, val_start) = match c {
             '=' => (i, i + 1),
             ':' => {
-                // closing quote right before, then optional spaces, then a quote
-                let Some(q) = s[..i]
-                    .chars()
-                    .next_back()
-                    .filter(|q| matches!(q, '\'' | '"'))
-                else {
-                    continue;
-                };
                 let v = s[i + 1..].trim_start_matches(' ');
                 let vs = s.len() - v.len();
-                if !v.starts_with(q) {
-                    continue;
+                match s[..i].chars().next_back() {
+                    // `'NAME': 'value'`: closing quote before, same quote opens the value
+                    Some(q @ ('\'' | '"')) if v.starts_with(q) => (i - 1, vs),
+                    // unquoted `NAME: value`
+                    Some(c) if is_name_char(c) => (i, vs),
+                    _ => continue,
                 }
-                (i - 1, vs)
             }
             _ => continue,
         };
@@ -100,7 +113,16 @@ fn pairs(s: &str) -> Vec<(usize, usize)> {
         if name_start == name_end || !is_secret_name(&s[name_start..name_end]) {
             continue;
         }
-        let (a, b) = value_range(s, val_start);
+        let (a, b) = if c == ':'
+            && s[name_start..name_end]
+                .to_ascii_lowercase()
+                .contains("auth")
+        {
+            // `Authorization: <scheme> <credentials>`: everything after the colon
+            (val_start, s.len())
+        } else {
+            value_range(s, val_start)
+        };
         if a < b && r.last().is_none_or(|&(_, e)| a >= e) {
             r.push((a, b));
         }
@@ -112,14 +134,26 @@ fn pairs(s: &str) -> Vec<(usize, usize)> {
 fn tokens(s: &str) -> Vec<(usize, usize)> {
     let lower = s.to_ascii_lowercase();
     let mut r = Vec::new();
-    let mut from = 0;
-    while let Some(i) = lower[from..].find("bearer ") {
-        let a = from + i + 7;
-        let b = s[a..].find(char::is_whitespace).map_or(s.len(), |j| a + j);
-        if a < b {
-            r.push((a, b));
+    for scheme in ["bearer ", "basic ", "token ", "digest "] {
+        let mut from = 0;
+        while let Some(i) = lower[from..].find(scheme) {
+            let start = from + i;
+            let a = start + scheme.len();
+            from = a;
+            if s[..start].chars().next_back().is_some_and(is_name_char) {
+                continue;
+            }
+            // Digest carries several comma-separated params: take the rest of the line.
+            let b = if scheme == "digest " {
+                s.len()
+            } else {
+                s[a..].find(char::is_whitespace).map_or(s.len(), |j| a + j)
+            };
+            if a < b {
+                r.push((a, b));
+            }
+            from = b.max(a);
         }
-        from = b.max(a);
     }
     let bytes = s.as_bytes();
     let mut i = 0;
@@ -197,8 +231,14 @@ impl LogWriter {
     pub fn create(paths: &Paths, owner: i64, run_id: i64, kind: RunKind) -> Result<Self> {
         let path = Self::log_path(paths, owner, run_id, kind);
         let dir = path.parent().unwrap_or(Path::new("."));
-        std::fs::create_dir_all(dir).map_err(Error::io(dir))?;
-        let f = File::create(&path).map_err(Error::io(&path))?;
+        create_private_dir(dir)?;
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(Error::io(&path))?;
         Ok(Self {
             path,
             out: BufWriter::new(f),
@@ -248,7 +288,7 @@ mod tests {
             ("db_password=\"a b\" z", "db_password=\"<redacted>\" z"),
             (
                 "Authorization: Bearer abc.def-1 rest",
-                "Authorization: Bearer <redacted> rest",
+                "Authorization: <redacted>",
             ),
             (
                 "tok ghp_abcdefghijklmnopqrstuvwxyz0123 end",
@@ -291,6 +331,90 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_and_unordered_ranges_do_not_panic() {
+        assert_eq!(
+            redact("Bearer ghp_abcdefghijklmnopqrstuvwxyz0123 x"),
+            "Bearer <redacted> x"
+        );
+        assert_eq!(
+            redact("a ghp_abcdefghijklmnopqrstuvwxyz0123 then Bearer tok"),
+            "a <redacted> then Bearer <redacted>"
+        );
+    }
+
+    #[test]
+    fn unquoted_colon_and_auth_schemes() {
+        let cases = [
+            ("password: hunter2 ok", "password: <redacted> ok"),
+            ("SECRET=a", "SECRET=<redacted>"),
+            (
+                "Authorization: Basic dXNlcjpwdw== extra",
+                "Authorization: <redacted>",
+            ),
+            (
+                "Authorization: Digest user=\"a\", nonce=\"b\"",
+                "Authorization: <redacted>",
+            ),
+            ("sent Token abc123 now", "sent Token <redacted> now"),
+            ("csrftoken abc", "csrftoken abc"),
+            (
+                "'API_KEY': 'a\\'b c', 'X': 'y'",
+                "'API_KEY': '<redacted>', 'X': 'y'",
+            ),
+            ("KEY=\"a\\\"b\" z", "KEY=\"<redacted>\" z"),
+        ];
+        for (i, o) in cases {
+            assert_eq!(redact(i), o, "{i}");
+        }
+    }
+
+    #[test]
+    fn never_panics_on_arbitrary_input() {
+        let atoms = [
+            "é",
+            "ü",
+            "日",
+            "🦀",
+            "'",
+            "\"",
+            "\\",
+            "=",
+            ":",
+            "@",
+            "://",
+            " ",
+            "Bearer ",
+            "bearer ",
+            "Basic ",
+            "Token ",
+            "Digest ",
+            "ghp_",
+            "ghs_abcdefghijklmnopqrstuvwxyz",
+            "KEY",
+            "pass",
+            "Authorization",
+            "a",
+            "_",
+            "-",
+            "\n",
+        ];
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        for _ in 0..20_000 {
+            let mut line = String::new();
+            for _ in 0..(x % 12) {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                line.push_str(atoms[(x % atoms.len() as u64) as usize]);
+            }
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let _ = redact(&line);
+        }
+    }
+
+    #[test]
     fn writer_redacts_and_tags() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = Paths::under(tmp.path());
@@ -305,5 +429,9 @@ mod tests {
             "argv: run API_KEY=<redacted>\n--\nO|hello\nE|Bearer <redacted>\n"
         );
         assert!(w.path().ends_with("logs/3/9-launch.log"));
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(w.path()), 0o600);
+        assert_eq!(mode(w.path().parent().unwrap()), 0o700);
     }
 }

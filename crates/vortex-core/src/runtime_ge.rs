@@ -3,13 +3,13 @@
 use crate::error::{Error, Result};
 use crate::paths::HostPath;
 use crate::runtime::validate;
+use async_channel::Sender;
 use sha2::{Digest, Sha512};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
 
 pub const LATEST_URL: &str =
     "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest";
@@ -113,7 +113,7 @@ pub fn install(
     let _part = Cleanup(part.clone());
     let actual = download(&release.asset_url, &part, progress, cancel)?;
 
-    let _ = progress.send(Progress::Verifying);
+    let _ = progress.send_blocking(Progress::Verifying);
     let sum = get(&release.sum_url)?
         .body_mut()
         .read_to_string()
@@ -129,7 +129,7 @@ pub fn install(
         )));
     }
 
-    let _ = progress.send(Progress::Extracting);
+    let _ = progress.send_blocking(Progress::Extracting);
     let tmp = runtimes_dir.join(format!(".tmp-{}", release.tag));
     let _tmp = Cleanup(tmp.clone());
     let _ = fs::remove_dir_all(&tmp);
@@ -170,7 +170,7 @@ fn download(
         h.update(&buf[..n]);
         f.write_all(&buf[..n]).map_err(Error::io(part))?;
         done += n as u64;
-        let _ = progress.send(Progress::Downloading { done, total });
+        let _ = progress.send_blocking(Progress::Downloading { done, total });
     }
     f.sync_all().map_err(Error::io(part))?;
     Ok(hex(&h.finalize()))
@@ -212,7 +212,6 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
     use std::net::TcpListener;
-    use std::sync::mpsc::channel;
     use std::thread;
 
     /// Tar.gz with the given (path, mode, content); raw header bytes so `..` can be written.
@@ -285,7 +284,7 @@ mod tests {
     fn run(data: Vec<u8>, sum: String, cancel: bool) -> (Result<HostPath>, tempfile::TempDir) {
         let base = serve(data, sum);
         let t = tempfile::tempdir().unwrap();
-        let (tx, _rx) = channel();
+        let (tx, _rx) = async_channel::unbounded();
         let r = install(&rel(&base), t.path(), &tx, &AtomicBool::new(cancel));
         (r, t)
     }

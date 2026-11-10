@@ -4,7 +4,7 @@
 use crate::error::{Error, Result};
 use crate::paths::HostPath;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 const MAX_DEPTH: usize = 2;
 /// Top two candidates closer than this are ambiguous.
@@ -51,15 +51,9 @@ fn ext(name: &str) -> &str {
     name.rsplit_once('.').map_or("", |(_, e)| e)
 }
 
-pub fn analyze(path: &Path) -> Result<SourceAnalysis> {
-    if path.components().any(|c| c == Component::ParentDir) {
-        return Err(Error::InvalidPath(format!(
-            "{} contains '..'",
-            path.display()
-        )));
-    }
+pub fn analyze(path: &HostPath) -> Result<SourceAnalysis> {
     // The user's explicit choice may itself be a symlink; resolve it once, then never follow again.
-    let root = fs::canonicalize(path).map_err(Error::io(path))?;
+    let root = fs::canonicalize(path).map_err(Error::io(path.as_path()))?;
     let meta = fs::metadata(&root).map_err(Error::io(&root))?;
     if meta.is_file() {
         if !matches!(ext(&lower(&root)), "exe" | "msi") {
@@ -226,6 +220,9 @@ mod tests {
         }
         d
     }
+    fn h(p: impl AsRef<Path>) -> HostPath {
+        HostPath::new(p).unwrap()
+    }
     fn top(a: &SourceAnalysis) -> String {
         a.candidates[0]
             .path
@@ -240,13 +237,13 @@ mod tests {
     fn standalone_exe_and_msi() {
         let d = tree(&["Game.EXE", "a.MSI", "notes.txt"]);
         for n in ["Game.EXE", "a.MSI"] {
-            let a = analyze(&d.path().join(n)).unwrap();
+            let a = analyze(&h(d.path().join(n))).unwrap();
             assert_eq!(a.kind, SourceKind::File);
             assert!(!a.ambiguous);
             assert_eq!(a.candidates.len(), 1);
         }
         assert!(matches!(
-            analyze(&d.path().join("notes.txt")),
+            analyze(&h(d.path().join("notes.txt"))),
             Err(Error::Validation(_))
         ));
     }
@@ -255,7 +252,7 @@ mod tests {
     fn zip_rejected() {
         let d = tree(&["g.zip"]);
         assert!(matches!(
-            analyze(&d.path().join("g.zip")),
+            analyze(&h(d.path().join("g.zip"))),
             Err(Error::Validation(_))
         ));
     }
@@ -272,7 +269,7 @@ mod tests {
             "Redist/vcredist_x64.exe",
             "Redist/DirectX/DXSETUP.exe",
         ]);
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert_eq!(a.kind, SourceKind::Dir);
         assert_eq!(top(&a), "setup.exe");
         assert!(!a.ambiguous);
@@ -286,7 +283,7 @@ mod tests {
             "setup_game_1.0-1.bin",
             "extras/other.exe",
         ]);
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert_eq!(top(&a), "setup_game_1.0.exe");
         assert!(!a.ambiguous);
     }
@@ -294,7 +291,7 @@ mod tests {
     #[test]
     fn installshield_boost() {
         let d = tree(&["launcher.exe", "disc/inst.exe", "disc/data1.cab"]);
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         // depth-1 inst.exe with data1.cab (10-30+30=10) ties launcher (10): both listed, ambiguous.
         assert!(
             a.candidates
@@ -302,10 +299,10 @@ mod tests {
                 .any(|c| c.reasons.iter().any(|r| r.contains("InstallShield")))
         );
         let d = tree(&["a.exe", "b.exe", "data1.cab"]);
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert!(a.ambiguous); // both boosted equally
         let d = tree(&["setup.exe", "data1.hdr", "tool.exe"]);
-        assert_eq!(top(&analyze(d.path()).unwrap()), "setup.exe");
+        assert_eq!(top(&analyze(&h(d.path())).unwrap()), "setup.exe");
     }
 
     #[test]
@@ -316,7 +313,7 @@ mod tests {
             "[autorun]\r\nOpen=START.EXE /x\r\n",
         )
         .unwrap();
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert_eq!(top(&a), "start.exe");
         assert!(!a.ambiguous);
     }
@@ -325,36 +322,36 @@ mod tests {
     fn autorun_traversal_ignored() {
         let d = tree(&["setup.exe"]);
         fs::write(d.path().join("autorun.inf"), "open=..\\..\\evil.exe\n").unwrap();
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert_eq!(a.candidates.len(), 1);
     }
 
     #[test]
     fn msi_toplevel() {
         let d = tree(&["game.msi", "Redist/x.exe"]);
-        assert_eq!(top(&analyze(d.path()).unwrap()), "game.msi");
+        assert_eq!(top(&analyze(&h(d.path())).unwrap()), "game.msi");
     }
 
     #[test]
     fn ambiguous_equal_setups() {
         let d = tree(&["setup.exe", "install.exe"]);
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert!(a.ambiguous);
         let d = tree(&["setup_a.exe", "setup_b.exe"]);
-        assert!(analyze(d.path()).unwrap().ambiguous);
+        assert!(analyze(&h(d.path())).unwrap().ambiguous);
     }
 
     #[test]
     fn empty_dir_ambiguous() {
         let d = tempfile::tempdir().unwrap();
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert!(a.candidates.is_empty() && a.ambiguous);
     }
 
     #[test]
     fn depth_limited_and_uninstaller_penalized() {
         let d = tree(&["a/b/c/deep.exe", "unins000.exe", "game.exe"]);
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert!(
             a.candidates
                 .iter()
@@ -367,14 +364,14 @@ mod tests {
     fn parent_dir_rejected() {
         let d = tree(&["setup.exe"]);
         let p = d.path().join("sub/../setup.exe");
-        assert!(matches!(analyze(&p), Err(Error::InvalidPath(_))));
+        assert!(matches!(HostPath::new(p), Err(Error::InvalidPath(_))));
     }
 
     #[test]
     fn symlink_loop_terminates() {
         let d = tree(&["setup.exe", "sub/x.txt"]);
         symlink(d.path(), d.path().join("sub/loop")).unwrap();
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert_eq!(a.candidates.len(), 1);
     }
 
@@ -384,7 +381,7 @@ mod tests {
         let d = tree(&["setup.exe"]);
         symlink(outside.path().join("evil.exe"), d.path().join("link.exe")).unwrap();
         symlink(outside.path().join("dir"), d.path().join("linkdir")).unwrap();
-        let a = analyze(d.path()).unwrap();
+        let a = analyze(&h(d.path())).unwrap();
         assert_eq!(a.candidates.len(), 1);
         assert!(
             a.candidates[0]
@@ -398,7 +395,7 @@ mod tests {
     fn symlink_root_resolved_once() {
         let d = tree(&["real/setup.exe"]);
         symlink(d.path().join("real"), d.path().join("lnk")).unwrap();
-        let a = analyze(&d.path().join("lnk")).unwrap();
+        let a = analyze(&h(d.path().join("lnk"))).unwrap();
         assert_eq!(top(&a), "setup.exe");
     }
 }

@@ -1,13 +1,41 @@
-//! Library page: searchable, sortable grid of game cards, or an empty state.
+//! Library page: cover grid or compact list, searchable and sortable, filtered by sidebar mode.
 
 use crate::app::AppState;
 use crate::game_object::{GameObject, status_label};
+use crate::ui::cover::cover;
 use gtk4::gio;
 use gtk4::prelude::*;
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::rc::Rc;
+
+/// Sidebar sections of the library.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    All,
+    Recent,
+    Attention,
+}
+
+/// Does a game with this status / last-played time belong in `mode`?
+pub fn in_mode(mode: Mode, status: &str, last_played: i64) -> bool {
+    match mode {
+        Mode::All => true,
+        Mode::Recent => last_played > 0,
+        Mode::Attention => status != "installed",
+    }
+}
+
+pub fn last_played_text(ts: i64) -> String {
+    if ts <= 0 {
+        return "Never played".into();
+    }
+    gtk4::glib::DateTime::from_unix_local(ts)
+        .ok()
+        .and_then(|d| d.format("%x").ok())
+        .map_or_else(String::new, |s| s.to_string())
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SortKey {
@@ -41,7 +69,10 @@ pub struct Library {
     pub root: gtk4::Box,
     pub search_bar: gtk4::SearchBar,
     pub sort: gtk4::DropDown,
+    pub list_toggle: gtk4::ToggleButton,
     store: gio::ListStore,
+    mode: Rc<Cell<Mode>>,
+    filter: gtk4::CustomFilter,
     on_open: OpenCb,
 }
 
@@ -55,8 +86,13 @@ impl Library {
         search_bar.connect_entry(&entry);
         let sort = gtk4::DropDown::from_strings(&["Name", "Last played"]);
         sort.set_tooltip_text(Some("Sort by"));
+        let list_toggle = gtk4::ToggleButton::builder()
+            .icon_name("view-list-symbolic")
+            .tooltip_text("Compact list view")
+            .build();
 
         let key = Rc::new(Cell::new(SortKey::Name));
+        let mode = Rc::new(Cell::new(Mode::All));
         let sorter = gtk4::CustomSorter::new({
             let key = key.clone();
             move |a, b| {
@@ -75,10 +111,12 @@ impl Library {
             }
         });
         let filter = gtk4::CustomFilter::new({
-            let entry = entry.clone();
+            let (entry, mode) = (entry.clone(), mode.clone());
             move |o| {
-                o.downcast_ref::<GameObject>()
-                    .is_some_and(|g| matches(&g.name(), &entry.text()))
+                o.downcast_ref::<GameObject>().is_some_and(|g| {
+                    matches(&g.name(), &entry.text())
+                        && in_mode(mode.get(), &g.status(), g.last_played())
+                })
             }
         });
         {
@@ -93,60 +131,89 @@ impl Library {
             entry.connect_search_changed(move |_| filter.changed(gtk4::FilterChange::Different));
         }
 
-        let filtered = gtk4::FilterListModel::new(Some(store.clone()), Some(filter));
-        let sorted = gtk4::SortListModel::new(Some(filtered), Some(sorter));
+        let filtered = gtk4::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
+        let sorted = gtk4::SortListModel::new(Some(filtered.clone()), Some(sorter));
         let selection = gtk4::NoSelection::new(Some(sorted));
 
-        let factory = gtk4::SignalListItemFactory::new();
-        factory.connect_setup(|_, item| {
-            let Some(item) = item.downcast_ref::<gtk4::ListItem>() else {
-                return;
-            };
-            item.set_child(Some(&card()));
+        let grid_factory = gtk4::SignalListItemFactory::new();
+        grid_factory.connect_setup(|_, item| {
+            if let Some(item) = item.downcast_ref::<gtk4::ListItem>() {
+                item.set_child(Some(&gtk4::Box::new(gtk4::Orientation::Vertical, 6)));
+            }
         });
-        factory.connect_bind(|_, item| {
+        grid_factory.connect_bind(|_, item| {
             let Some(item) = item.downcast_ref::<gtk4::ListItem>() else {
                 return;
             };
-            let (Some(g), Some(card)) = (
+            if let (Some(g), Some(b)) = (
                 item.item().and_downcast::<GameObject>(),
                 item.child().and_downcast::<gtk4::Box>(),
-            ) else {
+            ) {
+                fill_tile(&b, &g);
+            }
+        });
+        let list_factory = gtk4::SignalListItemFactory::new();
+        list_factory.connect_setup(|_, item| {
+            if let Some(item) = item.downcast_ref::<gtk4::ListItem>() {
+                item.set_child(Some(&gtk4::Box::new(gtk4::Orientation::Horizontal, 12)));
+            }
+        });
+        list_factory.connect_bind(|_, item| {
+            let Some(item) = item.downcast_ref::<gtk4::ListItem>() else {
                 return;
             };
-            bind_card(&card, &g);
+            if let (Some(g), Some(b)) = (
+                item.item().and_downcast::<GameObject>(),
+                item.child().and_downcast::<gtk4::Box>(),
+            ) {
+                fill_row(&b, &g);
+            }
         });
+
         let grid = gtk4::GridView::builder()
             .model(&selection)
-            .factory(&factory)
+            .factory(&grid_factory)
             .min_columns(1)
-            .max_columns(8)
+            .max_columns(10)
             .single_click_activate(true)
             .margin_top(12)
             .margin_bottom(12)
             .margin_start(12)
             .margin_end(12)
             .build();
-        grid.add_css_class("navigation-sidebar");
+        let list = gtk4::ListView::builder()
+            .model(&selection)
+            .factory(&list_factory)
+            .single_click_activate(true)
+            .css_classes(["rich-list"])
+            .margin_top(12)
+            .margin_bottom(12)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
         let on_open: OpenCb = Rc::new(RefCell::new(None));
-        {
+        let activate = {
             let on_open = on_open.clone();
-            grid.connect_activate(move |g, pos| {
-                let id = g
-                    .model()
+            move |model: Option<gtk4::gio::ListModel>, pos: u32| {
+                let id = model
                     .and_then(|m| m.item(pos))
                     .and_downcast::<GameObject>()
                     .map(|o| o.id());
                 if let (Some(id), Some(f)) = (id, on_open.borrow().as_ref()) {
                     f(id);
                 }
-            });
+            }
+        };
+        {
+            let a = activate.clone();
+            grid.connect_activate(move |g, pos| a(g.model().map(|m| m.upcast()), pos));
         }
+        list.connect_activate(move |l, pos| activate(l.model().map(|m| m.upcast()), pos));
 
         let empty = adw::StatusPage::builder()
             .icon_name("applications-games-symbolic")
-            .title("No games yet")
-            .description("Install a Windows game to see it here.")
+            .title("No games here")
+            .description("Install a Windows game, or add one that is already installed.")
             .child(
                 &gtk4::Button::builder()
                     .label("Install a Game")
@@ -165,11 +232,46 @@ impl Library {
                 .build(),
             Some("grid"),
         );
-        let update = {
-            let stack = stack.clone();
-            move |n: u32| stack.set_visible_child_name(if n == 0 { "empty" } else { "grid" })
+        stack.add_named(
+            &gtk4::ScrolledWindow::builder()
+                .child(&list)
+                .vexpand(true)
+                .build(),
+            Some("list"),
+        );
+        let show = {
+            let (stack, toggle, filtered) = (stack.clone(), list_toggle.clone(), filtered.clone());
+            Rc::new(move || {
+                let name = if filtered.n_items() == 0 {
+                    "empty"
+                } else if toggle.is_active() {
+                    "list"
+                } else {
+                    "grid"
+                };
+                stack.set_visible_child_name(name);
+            })
         };
-        store.connect_items_changed(move |s, _, _, _| update(s.n_items()));
+        {
+            let show = show.clone();
+            filtered.connect_items_changed(move |_, _, _, _| show());
+        }
+        {
+            let show = show.clone();
+            list_toggle.connect_toggled(move |t| {
+                t.set_icon_name(if t.is_active() {
+                    "view-grid-symbolic"
+                } else {
+                    "view-list-symbolic"
+                });
+                t.set_tooltip_text(Some(if t.is_active() {
+                    "Cover grid view"
+                } else {
+                    "Compact list view"
+                }));
+                show();
+            });
+        }
         stack.set_visible_child_name("empty");
 
         let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -179,9 +281,17 @@ impl Library {
             root,
             search_bar,
             sort,
+            list_toggle,
             store,
+            mode,
+            filter,
             on_open,
         }
+    }
+
+    pub fn set_mode(&self, m: Mode) {
+        self.mode.set(m);
+        self.filter.changed(gtk4::FilterChange::Different);
     }
 
     pub fn connect_open(&self, f: impl Fn(i64) + 'static) {
@@ -190,61 +300,97 @@ impl Library {
 
     /// Reloads all games from the database (tiny queries, safe on the GTK thread).
     pub fn refresh(&self, state: &AppState) {
-        let games = match state.db.list_games() {
+        let db = state.db();
+        let games = match db.list_games() {
             Ok(g) => g,
-            Err(e) => return state.toast(&e.to_string()),
+            Err(e) => {
+                drop(db);
+                return state.toast(&e.to_string());
+            }
         };
         let items: Vec<GameObject> = games
             .iter()
             .map(|g| {
-                let last = state
-                    .db
-                    .last_launch(g.id)
+                let last = db.last_launch(g.id).ok().flatten().map(|r| r.started_at);
+                let rt = db
+                    .get_environment(g.environment_id)
                     .ok()
-                    .flatten()
-                    .map(|r| r.started_at);
-                GameObject::new(g, last)
+                    .and_then(|e| {
+                        std::path::Path::new(&e.runtime_path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                    })
+                    .unwrap_or_default();
+                GameObject::new(g, last, &rt)
             })
             .collect();
         self.store.splice(0, self.store.n_items(), &items);
     }
 }
 
-fn card() -> gtk4::Box {
-    let b = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
-    b.set_size_request(150, -1);
-    b.set_margin_top(12);
-    b.set_margin_bottom(12);
-    b.set_margin_start(6);
-    b.set_margin_end(6);
-    b.append(&adw::Avatar::new(72, None, true));
-    let name = gtk4::Label::builder()
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .css_classes(["heading"])
-        .build();
-    let status = gtk4::Label::builder()
-        .css_classes(["dim-label", "caption"])
-        .build();
-    b.append(&name);
-    b.append(&status);
-    b
+fn clear(b: &gtk4::Box) {
+    while let Some(c) = b.first_child() {
+        b.remove(&c);
+    }
 }
 
-fn bind_card(card: &gtk4::Box, g: &GameObject) {
-    let avatar = card.first_child().and_downcast::<adw::Avatar>();
-    let name = avatar
-        .as_ref()
-        .and_then(|a| a.next_sibling())
-        .and_downcast::<gtk4::Label>();
-    let status = name
-        .as_ref()
-        .and_then(|n| n.next_sibling())
-        .and_downcast::<gtk4::Label>();
-    if let (Some(a), Some(n), Some(s)) = (avatar, name, status) {
-        a.set_text(Some(&g.name()));
-        n.set_text(&g.name());
-        s.set_text(status_label(&g.status()));
-    }
+fn fill_tile(b: &gtk4::Box, g: &GameObject) {
+    clear(b);
+    b.add_css_class("game-tile");
+    b.set_halign(gtk4::Align::Center);
+    b.append(&cover(&g.name(), 150, 225));
+    b.append(
+        &gtk4::Label::builder()
+            .label(g.name())
+            .max_width_chars(16)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .css_classes(["heading"])
+            .build(),
+    );
+    b.append(
+        &gtk4::Label::builder()
+            .label(status_label(&g.status()))
+            .css_classes(["dim-label", "caption"])
+            .build(),
+    );
+}
+
+fn fill_row(b: &gtk4::Box, g: &GameObject) {
+    clear(b);
+    b.set_margin_top(6);
+    b.set_margin_bottom(6);
+    b.set_margin_start(6);
+    b.set_margin_end(6);
+    b.append(&cover(&g.name(), 40, 56));
+    let col = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    col.set_hexpand(true);
+    col.set_valign(gtk4::Align::Center);
+    col.append(
+        &gtk4::Label::builder()
+            .label(g.name())
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .css_classes(["heading"])
+            .build(),
+    );
+    col.append(
+        &gtk4::Label::builder()
+            .label(format!(
+                "{} - {}",
+                g.runtime(),
+                last_played_text(g.last_played())
+            ))
+            .xalign(0.0)
+            .css_classes(["dim-label", "caption"])
+            .build(),
+    );
+    b.append(&col);
+    b.append(
+        &gtk4::Label::builder()
+            .label(status_label(&g.status()))
+            .css_classes(["dim-label"])
+            .build(),
+    );
 }
 
 #[cfg(test)]
@@ -265,6 +411,14 @@ mod tests {
         assert_eq!(compare(k, ("a", 5), ("b", 9)), Ordering::Greater);
         assert_eq!(compare(k, ("a", 0), ("b", 9)), Ordering::Greater); // never played last
         assert_eq!(compare(k, ("a", 3), ("b", 3)), Ordering::Less);
+    }
+
+    #[test]
+    fn modes() {
+        assert!(in_mode(Mode::Attention, "failed", 0));
+        assert!(!in_mode(Mode::Attention, "installed", 0));
+        assert!(in_mode(Mode::Recent, "installed", 5));
+        assert!(!in_mode(Mode::Recent, "installed", 0));
     }
 
     #[test]

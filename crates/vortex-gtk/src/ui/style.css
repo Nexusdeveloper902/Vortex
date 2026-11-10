@@ -1,0 +1,14 @@
+.cover { border-radius: 14px; color: white; box-shadow: 0 2px 8px alpha(black, 0.3); }
+.cover-big { font-size: 38px; font-weight: 800; }
+.cover-small { font-size: 15px; font-weight: 800; }
+.cover-0 { background-image: linear-gradient(160deg, #3584e4, #1a4a8f); }
+.cover-1 { background-image: linear-gradient(160deg, #33b36b, #1c6b40); }
+.cover-2 { background-image: linear-gradient(160deg, #e66100, #99400a); }
+.cover-3 { background-image: linear-gradient(160deg, #9141ac, #5a2570); }
+.cover-4 { background-image: linear-gradient(160deg, #c64600, #7a2a00); }
+.cover-5 { background-image: linear-gradient(160deg, #1a9fa8, #0e5f66); }
+.cover-6 { background-image: linear-gradient(160deg, #d6336c, #8c1d45); }
+.cover-7 { background-image: linear-gradient(160deg, #62758a, #34414f); }
+.game-tile { padding: 8px; border-radius: 18px; }
+.game-tile:hover { background: alpha(currentColor, 0.07); }
+.hero-title { font-size: 26px; font-weight: 800; }

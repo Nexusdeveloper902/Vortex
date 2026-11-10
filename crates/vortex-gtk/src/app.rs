@@ -1,19 +1,31 @@
 //! Application, main window and shared UI state.
 
-use crate::ui::{game_page, library::Library, runtimes, settings};
+use crate::ui::{
+    dialogs, game_page, install_wizard,
+    library::{Library, Mode},
+    runtimes, settings,
+};
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use vortex_core::db::Db;
+use vortex_core::install::Installs;
 use vortex_core::paths::Paths;
+use vortex_core::process::Runs;
+use vortex_core::runner::Tools;
 
 pub const APP_ID: &str = "io.github.nexusdeveloper902.Vortex";
 
-/// Everything pages need. Lives on the GTK thread; the `Db` is only touched here (queries are tiny).
+/// Everything pages need. Lives on the GTK thread. `db`, `runs` and `installs` are shared with the
+/// core worker threads; UI code only takes the lock for tiny queries (long jobs open their own
+/// connection, see `dialogs::with_db`).
 pub struct AppState {
-    pub db: Db,
+    pub db: Arc<Mutex<Db>>,
+    pub runs: Arc<Runs>,
+    pub installs: Arc<Installs>,
     pub paths: Paths,
     pub window: adw::ApplicationWindow,
     pub toasts: adw::ToastOverlay,
@@ -21,6 +33,10 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn db(&self) -> MutexGuard<'_, Db> {
+        self.db.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn toast(&self, msg: &str) {
         self.toasts.add_toast(adw::Toast::new(msg));
     }
@@ -33,6 +49,18 @@ pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static)
         let _ = tx.send_blocking(f());
     });
     rx.recv().await.ok()
+}
+
+fn load_css() {
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_string(include_str!("ui/style.css"));
+    if let Some(d) = gtk4::gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &d,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
 }
 
 pub fn run() -> glib::ExitCode {
@@ -71,34 +99,36 @@ fn activate(app: &adw::Application) {
             return;
         }
     };
+    let db = Arc::new(Mutex::new(db));
+    let runs = Arc::new(Runs::new(paths.clone(), Tools::default(), db.clone()));
+    let mut installs = Installs::new(paths.clone(), db.clone(), runs.clone());
+    if let Ok(exe) = std::env::current_exe() {
+        installs = installs.with_desktop_entries(exe);
+    }
+    // Before any run starts: marks dead runs/installs interrupted, keeps live ones as detached.
+    let recovered = installs.recover();
     let state = Rc::new(AppState {
         db,
+        runs,
+        installs: Arc::new(installs),
         paths,
         window: window.clone(),
-        toasts,
+        toasts: toasts.clone(),
         nav: nav.clone(),
     });
     install_actions(app, &state);
+    if let Err(e) = recovered {
+        state.toast(&e.to_string());
+    }
 
+    load_css();
     let library = Rc::new(Library::new(&state));
-    let stack = adw::ViewStack::new();
-    stack.add_titled_with_icon(
-        &library.root,
-        Some("library"),
-        "Library",
-        "view-grid-symbolic",
-    );
-    stack.add_titled_with_icon(
-        &runtimes::build(&state),
-        Some("runtimes"),
-        "Runtimes",
-        "application-x-executable-symbolic",
-    );
 
-    let switcher = adw::ViewSwitcher::builder()
-        .stack(&stack)
-        .policy(adw::ViewSwitcherPolicy::Wide)
-        .build();
+    // Content pane: library views or the runtimes page.
+    let stack = gtk4::Stack::new();
+    stack.add_named(&library.root, Some("library"));
+    stack.add_named(&runtimes::build(&state), Some("runtimes"));
+    let title = adw::WindowTitle::new("All games", "");
     let search = gtk4::ToggleButton::builder()
         .icon_name("system-search-symbolic")
         .tooltip_text("Search")
@@ -107,6 +137,48 @@ fn activate(app: &adw::Application) {
         .bind_property("active", &library.search_bar, "search-mode-enabled")
         .bidirectional()
         .sync_create()
+        .build();
+    let content_header = adw::HeaderBar::new();
+    content_header.set_title_widget(Some(&title));
+    content_header.pack_start(&search);
+    content_header.pack_end(&library.list_toggle);
+    content_header.pack_end(&library.sort);
+    let content_view = adw::ToolbarView::new();
+    content_view.add_top_bar(&content_header);
+    content_view.set_content(Some(&stack));
+    nav.add(&adw::NavigationPage::with_tag(
+        &content_view,
+        "Vortex",
+        "library",
+    ));
+    library.search_bar.set_key_capture_widget(Some(&window));
+
+    // Sidebar (Bottles-style): sections plus a "+" menu for install / add existing.
+    let sections = [
+        ("All games", "view-grid-symbolic"),
+        ("Recently played", "document-open-recent-symbolic"),
+        ("Needs attention", "dialog-warning-symbolic"),
+        ("Runtimes", "application-x-executable-symbolic"),
+    ];
+    let side_list = gtk4::ListBox::builder()
+        .selection_mode(gtk4::SelectionMode::Single)
+        .css_classes(["navigation-sidebar"])
+        .build();
+    for (label, icon) in sections {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+        row.set_margin_top(10);
+        row.set_margin_bottom(10);
+        row.append(&gtk4::Image::from_icon_name(icon));
+        row.append(&gtk4::Label::new(Some(label)));
+        side_list.append(&row);
+    }
+    let add_menu = gio::Menu::new();
+    add_menu.append(Some("Install a game..."), Some("win.install-game"));
+    add_menu.append(Some("Add an existing game..."), Some("win.add-existing"));
+    let add_btn = gtk4::MenuButton::builder()
+        .icon_name("list-add-symbolic")
+        .menu_model(&add_menu)
+        .tooltip_text("Install or add a game")
         .build();
     let menu = gio::Menu::new();
     menu.append(Some("Preferences"), Some("win.preferences"));
@@ -117,17 +189,67 @@ fn activate(app: &adw::Application) {
         .primary(true)
         .tooltip_text("Main menu")
         .build();
-
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&switcher));
-    header.pack_start(&search);
-    header.pack_start(&library.sort);
-    header.pack_end(&menu_button);
-    let view = adw::ToolbarView::new();
-    view.add_top_bar(&header);
-    view.set_content(Some(&stack));
-    nav.add(&adw::NavigationPage::new(&view, "Vortex"));
-    library.search_bar.set_key_capture_widget(Some(&window));
+    let side_header = adw::HeaderBar::new();
+    side_header.set_title_widget(Some(&adw::WindowTitle::new("Vortex", "")));
+    side_header.pack_start(&add_btn);
+    side_header.pack_end(&menu_button);
+    let side_view = adw::ToolbarView::new();
+    side_view.add_top_bar(&side_header);
+    side_view.set_content(Some(&side_list));
+    let split = adw::NavigationSplitView::new();
+    split.set_sidebar(Some(&adw::NavigationPage::new(&side_view, "Vortex")));
+    split.set_content(Some(&adw::NavigationPage::new(&nav, "Content")));
+    split.set_min_sidebar_width(200.0);
+    split.set_max_sidebar_width(260.0);
+    {
+        let (library, stack, title, nav, split) = (
+            library.clone(),
+            stack.clone(),
+            title.clone(),
+            nav.clone(),
+            split.clone(),
+        );
+        let (search, sort, toggle) = (
+            search.clone(),
+            library.sort.clone(),
+            library.list_toggle.clone(),
+        );
+        side_list.connect_row_selected(move |_, row| {
+            let Some(i) = row.map(|r| r.index()) else {
+                return;
+            };
+            nav.pop_to_tag("library");
+            title.set_title(sections[i as usize].0);
+            let is_lib = i < 3;
+            stack.set_visible_child_name(if is_lib { "library" } else { "runtimes" });
+            for w in [
+                search.upcast_ref::<gtk4::Widget>(),
+                sort.upcast_ref(),
+                toggle.upcast_ref(),
+            ] {
+                w.set_visible(is_lib);
+            }
+            library.set_mode([Mode::All, Mode::Recent, Mode::Attention, Mode::All][i as usize]);
+            split.set_show_content(true);
+        });
+    }
+    if let Some(r) = side_list.row_at_index(0) {
+        side_list.select_row(Some(&r));
+    }
+    split.set_show_content(false);
+    // Narrow windows: sidebar becomes a page of its own.
+    window.set_width_request(360);
+    if let Ok(cond) = adw::BreakpointCondition::parse("max-width: 640sp") {
+        let bp = adw::Breakpoint::new(cond);
+        bp.add_setter(&split, "collapsed", Some(&true.to_value()));
+        window.add_breakpoint(bp);
+    }
+    let banner = dialogs::detached_banner(&state);
+    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    root.append(&banner);
+    split.set_vexpand(true);
+    root.append(&split);
+    toasts.set_child(Some(&root));
 
     // Open a game page; refresh the grid when coming back (status may have changed).
     {
@@ -170,12 +292,15 @@ fn install_actions(app: &adw::Application, state: &Rc<AppState>) {
             }),
         );
     }
-    // STUB for M12: connect the install wizard here (replace this handler).
+    {
+        let s = state.clone();
+        add("install-game", Box::new(move || install_wizard::open(&s)));
+    }
     {
         let s = state.clone();
         add(
-            "install-game",
-            Box::new(move || s.toast("Not available yet")),
+            "add-existing",
+            Box::new(move || install_wizard::open_existing(&s)),
         );
     }
     app.set_accels_for_action("win.preferences", &["<primary>comma"]);

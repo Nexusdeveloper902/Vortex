@@ -316,6 +316,32 @@ fn plan_changed_before_execute_aborts() {
     assert!(db.get_game(g).is_ok());
 }
 
+/// F6: execute deletes the rebuilt items and refuses a plan whose items differ from them, so an
+/// item added to the shown plan is never deleted.
+#[test]
+fn plan_with_extra_item_is_refused() {
+    let (tmp, paths, db) = setup();
+    let (env, g) = game(&db, &paths, "T");
+    let mut plan = plan_game_removal(&db, &paths, g).unwrap();
+    let extra = tmp.path().join("not planned");
+    fs::create_dir(&extra).unwrap();
+    plan.items.push(DeletionItem {
+        path: vortex_core::paths::HostPath::new(&extra).unwrap(),
+        bytes: 0,
+    });
+    assert!(matches!(
+        execute(&db, &paths, &plan),
+        Err(Error::Validation(_))
+    ));
+    assert!(extra.exists());
+    assert!(paths.managed_prefix(env).unwrap().as_path().exists());
+    assert!(db.get_game(g).is_ok());
+    plan.items.pop();
+    execute(&db, &paths, &plan).unwrap();
+    assert!(extra.exists());
+    assert!(!paths.managed_prefix(env).unwrap().as_path().exists());
+}
+
 #[test]
 fn every_install_source_is_protected() {
     let (tmp, paths, db) = setup();

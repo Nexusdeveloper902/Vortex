@@ -12,6 +12,9 @@
 #              in $WINEPREFIX/fake-wineserver.pid so the fake wineserver -w waits for it
 #   stray:S    like orphan but not known to the fake wineserver (outlives the barrier)
 #   trap       ignore SIGTERM and block (stop must escalate to SIGKILL)
+#   respawn:S  start a helper WITHOUT the marker that, for S seconds, starts a marked
+#              `sleep 0.5` every 0.05 s (marker processes that keep appearing after a stop, like
+#              a respawning service); the last one ends ~0.5 s after S
 if [ -n "${FAKE_UMU_OUT:-}" ]; then
   { printf 'cwd=%s\n' "$PWD"; for a in "$@"; do printf 'arg=%s\n' "$a"; done; } > "$FAKE_UMU_OUT"
   env > "$FAKE_UMU_OUT.env"
@@ -32,6 +35,11 @@ for step in ${FAKE_UMU_MODE:-exit:0}; do
         </dev/null >/dev/null 2>&1 &
       while [ ! -s "$pidf" ]; do sleep 0.01; done ;;
     stray:*) setsid sleep "${step#stray:}" </dev/null >/dev/null 2>&1 & ;;
+    respawn:*)
+      env -u VORTEX_RUN_ID M="$VORTEX_RUN_ID" S="${step#respawn:}" setsid sh -c '
+        end=$(($(date +%s) + S))
+        while [ "$(date +%s)" -lt "$end" ]; do VORTEX_RUN_ID=$M sleep 0.5 & sleep 0.05; done
+      ' </dev/null >/dev/null 2>&1 & ;;
     trap) trap '' TERM; sleep 600 </dev/null >/dev/null 2>&1 & wait ;;
     *) echo "fake-umu-run: unknown mode step $step" >&2; exit 99 ;;
   esac

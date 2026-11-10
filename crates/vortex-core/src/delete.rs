@@ -194,26 +194,31 @@ fn tree_bytes(p: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Removes exactly `plan`. The plan is rebuilt first; if the rebuilt plan contains anything the
-/// shown plan did not (or the rebuild is refused), nothing is deleted. Items that already vanished
-/// are fine, so a failed execution can be retried.
+/// Removes exactly `plan`. The plan is rebuilt first and only the rebuilt items are deleted; if
+/// they are not exactly the shown plan's paths (or the rebuild is refused), nothing is deleted.
+/// Shown items that already vanished are fine, so a failed execution can be retried.
 ///
 /// Order: files first, then database rows, then the game's desktop entry (if any). If removing a
 /// directory fails, the rows are kept (the game stays listed, partly deleted) and `execute` can be
 /// run again.
 pub fn execute(db: &Db, paths: &Paths, plan: &DeletionPlan) -> Result<()> {
     let fresh = build(db, paths, plan.env_id, plan.game_id)?;
+    let shown = |p: &HostPath| plan.items.iter().any(|i| i.path == *p);
+    let fresh_has = |p: &HostPath| fresh.items.iter().any(|i| i.path == *p);
+    // Equal sets, except shown items that no longer exist (a retried, partly done execution).
     if fresh.remove_env != plan.remove_env
-        || fresh
+        || !fresh.items.iter().all(|i| shown(&i.path))
+        || plan
             .items
             .iter()
-            .any(|i| !plan.items.iter().any(|p| p.path == i.path))
+            .any(|i| !fresh_has(&i.path) && fs::symlink_metadata(i.path.as_path()).is_ok())
     {
         return Err(Error::Validation(
             "the deletion plan changed; review it again".into(),
         ));
     }
-    for it in &plan.items {
+    // Delete what was just validated, never the caller's list.
+    for it in &fresh.items {
         let p = it.path.as_path();
         // re-check right before deleting: still a real directory at the planned location
         match fs::symlink_metadata(p) {

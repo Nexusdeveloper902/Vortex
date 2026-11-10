@@ -224,10 +224,16 @@ pub fn dependencies(state: &Rc<AppState>, env_id: i64) {
 // ---- backup / restore ----
 
 pub fn backup_now(state: &Rc<AppState>, env_id: i64) {
+    // Held for the whole backup so Play cannot start in the prefix being archived.
+    let guard = match state.runs.reserve(env_id) {
+        Ok(g) => g,
+        Err(e) => return state.toast(&e.to_string()),
+    };
     state.toast("Backing up...");
     let state = state.clone();
     glib::spawn_future_local(async move {
         let r = with_db(&state, move |db, paths| {
+            let _guard = guard;
             backup::backup(db, paths, env_id, &AtomicBool::new(false))
         })
         .await;
@@ -285,9 +291,15 @@ pub fn restore_dialog(state: &Rc<AppState>, env_id: i64) {
                 move || {
                     d.close();
                     let state = state2.clone();
+                    // Held for the whole restore: the prefix is renamed away and replaced.
+                    let guard = match state.runs.reserve(env_id) {
+                        Ok(g) => g,
+                        Err(e) => return state.toast(&e.to_string()),
+                    };
                     state.toast("Restoring...");
                     glib::spawn_future_local(async move {
                         let r = with_db(&state, move |db, paths| {
+                            let _guard = guard;
                             let env = db.get_environment(env_id)?;
                             let p = PrefixDir::new(&env.prefix_path, paths.home(), &[])?;
                             backup::restore(db, paths, id, &p, true)
@@ -483,8 +495,17 @@ pub fn remove_completely(state: &Rc<AppState>, game_id: i64) {
             true,
             move || {
                 let (s, plan) = (s.clone(), plan.clone());
+                // Held while files and rows are removed so nothing starts in the environment.
+                let guard = match s.runs.reserve(plan.env_id) {
+                    Ok(g) => g,
+                    Err(e) => return s.toast(&e.to_string()),
+                };
                 glib::spawn_future_local(async move {
-                    let r = with_db(&s, move |db, paths| delete::execute(db, paths, &plan)).await;
+                    let r = with_db(&s, move |db, paths| {
+                        let _guard = guard;
+                        delete::execute(db, paths, &plan)
+                    })
+                    .await;
                     match r {
                         Ok(()) => {
                             s.nav.pop_to_tag("library");

@@ -5,7 +5,7 @@
 //! SIGKILL whatever still carries the marker. Nothing here guesses success: exit codes are the low
 //! 8 bits only, and leftovers are reported as `Uncertain`.
 
-use crate::db::{Db, NewRun, RunKind, RunState, proc_start_time};
+use crate::db::{Db, NewRun, Run, RunKind, RunState, proc_start_time};
 use crate::error::{EnvId, Error, Result};
 use crate::logs::{LogWriter, Stream, redact};
 use crate::paths::{HostPath, Paths, PrefixDir};
@@ -134,6 +134,7 @@ struct Ctl {
 pub struct RunHandle {
     run_id: i64,
     env_id: EnvId,
+    kind: RunKind,
     marker: String,
     ctl: Arc<Ctl>,
 }
@@ -144,6 +145,9 @@ impl RunHandle {
     }
     pub fn env_id(&self) -> EnvId {
         self.env_id
+    }
+    pub fn kind(&self) -> RunKind {
+        self.kind
     }
     pub fn marker(&self) -> &str {
         &self.marker
@@ -158,7 +162,32 @@ impl RunHandle {
     }
 }
 
-type Active = Arc<Mutex<HashMap<EnvId, RunHandle>>>;
+/// Environments busy in this session: a supervised run, or `None` for a [`Guard`] reservation.
+type Active = Arc<Mutex<HashMap<EnvId, Option<RunHandle>>>>;
+
+/// Holds an environment busy (see [`Runs::reserve`]) until dropped.
+pub struct Guard {
+    active: Active,
+    env: EnvId,
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        let mut a = lock(&self.active);
+        if matches!(a.get(&self.env), Some(None)) {
+            a.remove(&self.env);
+        }
+    }
+}
+
+/// The program file name of a run, from its recorded argv (`[umu-run, program, args...]`), for
+/// the UI to name a run that has no game ("setup.exe", "winetricks").
+pub fn program_name(argv_json: &str) -> Option<String> {
+    let argv: Vec<String> = serde_json::from_str(argv_json).ok()?;
+    let p = argv.get(1)?;
+    let base = p.rsplit(['/', '\\']).next().unwrap_or(p);
+    (!base.is_empty()).then(|| base.to_string())
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -191,7 +220,56 @@ impl Runs {
 
     /// The active run of an environment in this session, if any.
     pub fn active(&self, env: EnvId) -> Option<RunHandle> {
-        lock(&self.active).get(&env).cloned()
+        lock(&self.active).get(&env).cloned().flatten()
+    }
+
+    /// Occupies `env` for a long operation on its prefix (backup, restore, deletion): while the
+    /// returned guard lives, [`Runs::start`] fails with `Busy`. Fails with `Busy` itself if the
+    /// environment has a run (this session or detached) or another reservation.
+    pub fn reserve(&self, env: EnvId) -> Result<Guard> {
+        let mut active = lock(&self.active);
+        if active.contains_key(&env) || lock(&self.db).active_run_for_environment(env)?.is_some() {
+            return Err(Error::Busy(env));
+        }
+        active.insert(env, None);
+        Ok(Guard {
+            active: self.active.clone(),
+            env,
+        })
+    }
+
+    /// Runs recorded `running`/`waiting` that no supervisor of this session drives: they survived
+    /// a previous Vortex session ("running (detached)", ARCHITECTURE 6.4). Every kind, installs
+    /// included. The UI polls [`Runs::check_detached`] and offers [`Runs::stop_detached`].
+    pub fn detached(&self) -> Result<Vec<Run>> {
+        let active = lock(&self.active);
+        let mine: Vec<i64> = active.values().flatten().map(|h| h.run_id).collect();
+        let runs = lock(&self.db).active_runs()?;
+        Ok(runs.into_iter().filter(|r| !mine.contains(&r.id)).collect())
+    }
+
+    /// For a detached run: true while umu-run (pid + start time) or any marker process lives.
+    /// Once both are gone the row becomes `interrupted` with no exit code (nobody saw it end).
+    /// False for a run that is no longer `running`/`waiting`.
+    pub fn check_detached(&self, run_id: i64) -> Result<bool> {
+        if lock(&self.active)
+            .values()
+            .flatten()
+            .any(|h| h.run_id == run_id)
+        {
+            return Ok(true);
+        }
+        let run = lock(&self.db).get_run(run_id)?;
+        if !matches!(run.state, RunState::Running | RunState::Waiting) {
+            return Ok(false);
+        }
+        let pid_alive = matches!((run.pid, run.pid_start),
+            (Some(p), Some(s)) if proc_start_time(p) == Some(s));
+        if pid_alive || !scan_marker(&run.marker).is_empty() {
+            return Ok(true);
+        }
+        lock(&self.db).finish_run(run_id, RunState::Interrupted, None, false)?;
+        Ok(false)
     }
 
     /// Validates, records the run row (`running`) and log, spawns umu-run and its supervisor.
@@ -282,10 +360,11 @@ impl Runs {
         let handle = RunHandle {
             run_id,
             env_id: spec.env_id,
+            kind: spec.kind,
             marker,
             ctl: Arc::default(),
         };
-        active.insert(spec.env_id, handle.clone());
+        active.insert(spec.env_id, Some(handle.clone()));
         drop(active);
 
         let sup = Supervisor {
@@ -313,7 +392,7 @@ impl Runs {
             let env = db.get_environment(run.environment_id)?;
             (run, env)
         };
-        if self.active(run.environment_id).is_some() {
+        if lock(&self.active).contains_key(&run.environment_id) {
             return Err(Error::Busy(run.environment_id));
         }
         let prefix = PrefixDir::new(&env.prefix_path, self.paths.home(), &[])?;
@@ -398,7 +477,7 @@ impl Supervisor {
 
     /// Supervisor note: goes to the log and the UI as a `vortex: ` stderr line.
     fn note(&self, text: &str) {
-        let text = format!("vortex: {text}");
+        let text = format!("vortex: {}", redact(text));
         {
             let mut l = lock(&self.log);
             let _ = l.line(Stream::Stderr, &text).and_then(|()| l.flush());
@@ -470,18 +549,25 @@ impl Supervisor {
         };
         let stopped = matches!(wake, Wake::Stop);
         let wake = if stopped {
-            self.note("stop requested");
-            let left = stop_sequence(
-                self.wineserver.as_path(),
-                &self.prefix,
-                &self.h.marker,
-                i32::try_from(child.id()).ok(),
-                self.timing.stop_grace,
-            );
-            if left.is_empty() {
-                Wake::Done
-            } else {
-                self.uncertain(left)
+            loop {
+                // Consumed here, so `uncertain` keeps watching survivors instead of returning at
+                // once; a new Stop while they live runs the sequence again (6.3 step 4).
+                self.h.ctl.stop.store(false, Ordering::SeqCst);
+                self.note("stop requested");
+                let left = stop_sequence(
+                    self.wineserver.as_path(),
+                    &self.prefix,
+                    &self.h.marker,
+                    i32::try_from(child.id()).ok(),
+                    self.timing.stop_grace,
+                );
+                if left.is_empty() {
+                    break Wake::Done;
+                }
+                match self.uncertain(left) {
+                    Wake::Stop => continue,
+                    w => break w,
+                }
             }
         } else {
             wake
@@ -623,6 +709,9 @@ fn stop_sequence(
             let _ = kill_process(pid, Signal::KILL);
         }
     }
+    // SIGKILL is asynchronous and a respawner may restart a process: let it land before the
+    // first look, so "nothing left" is not concluded from a scan taken mid-teardown.
+    thread::sleep(Duration::from_millis(100));
     let mut left = Vec::new();
     wait_for(grace, || {
         left = scan_marker(marker);
@@ -705,7 +794,7 @@ pub fn scan_marker(marker: &str) -> Vec<ProcInfo> {
             Some(ProcInfo {
                 pid,
                 infra: is_infra(&argv),
-                name,
+                name: redact(&name).into_owned(),
             })
         })
         .collect();
@@ -726,6 +815,16 @@ mod tests {
         assert!(Exit::Low8(105).matches(1641));
         assert!(Exit::Low8(0).matches(0));
         assert!(!Exit::Signal(9).matches(9));
+    }
+
+    #[test]
+    fn program_name_from_argv() {
+        let a = r#"["/usr/bin/umu-run","/g/My Game/setup.exe","/q"]"#;
+        assert_eq!(program_name(a).as_deref(), Some("setup.exe"));
+        let w = r#"["umu-run","C:\\windows\\system32\\msiexec.exe"]"#;
+        assert_eq!(program_name(w).as_deref(), Some("msiexec.exe"));
+        assert_eq!(program_name(r#"["umu-run"]"#), None);
+        assert_eq!(program_name("not json"), None);
     }
 
     #[test]

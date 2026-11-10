@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  arch:
+    name: fmt, clippy, test (archlinux)
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install toolchain and GTK dependencies
+        run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita sqlite
+      - uses: actions/checkout@v4
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  core:
+    name: vortex-core without GTK
+    runs-on: ubuntu-latest
+    container: rust:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: vortex-core must not depend on gtk4, glib, gio or libadwaita
+        run: |
+          deps=$(cargo tree -p vortex-core -e normal --locked)
+          if echo "$deps" | grep -E 'gtk|glib|gio|adwaita'; then
+            echo "vortex-core has a forbidden GUI dependency"
+            exit 1
+          fi
+      - run: cargo test -p vortex-core --locked

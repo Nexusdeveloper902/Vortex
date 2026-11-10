@@ -201,6 +201,20 @@ fn deleting_a_leaves_b_intact() {
 }
 
 #[test]
+fn removing_a_game_removes_only_its_desktop_entry() {
+    let (_t, paths, db) = setup();
+    let (_ea, ga) = game(&db, &paths, "A");
+    let (_eb, gb) = game(&db, &paths, "B");
+    let bin = Path::new("/usr/bin/vortex");
+    let ea = vortex_core::desktop::write_entry(&paths, bin, &ga.to_string(), "A").unwrap();
+    let eb = vortex_core::desktop::write_entry(&paths, bin, &gb.to_string(), "B").unwrap();
+    let plan = plan_game_removal(&db, &paths, ga).unwrap();
+    execute(&db, &paths, &plan).unwrap();
+    assert!(!ea.exists(), "stale desktop entry {}", ea.display());
+    assert!(eb.exists());
+}
+
+#[test]
 fn unmanaged_prefix_is_never_planned_and_shared_env_is_kept() {
     let (tmp, paths, db) = setup();
     let ext = tmp.path().join("my-wine");

@@ -2,7 +2,7 @@
 # Builds Vortex from the git repository. Build from a clean checkout of this directory: makepkg -s
 # License: GPL-3.0-or-later (see the LICENSE file, installed under /usr/share/licenses).
 
-pkgname=vortex-git
+pkgname=vortex-launcher-git
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Install and run Windows games on Linux through Proton (MVP, early development)'
@@ -11,8 +11,8 @@ url='https://github.com/Nexusdeveloper902/Vortex'
 license=('GPL-3.0-or-later')
 depends=('gtk4' 'libadwaita' 'sqlite' 'umu-launcher' 'winetricks')
 makedepends=('cargo' 'git')
-provides=('vortex')
-conflicts=('vortex')
+provides=('vortex-launcher')
+conflicts=('vortex-launcher')
 # LTO objects from C code (ring's crypto) do not link with rust-lld; !lto keeps the flags plain.
 options=('!lto')
 source=("$pkgname::git+$url.git")
@@ -48,8 +48,13 @@ check() {
 
 package() {
   cd "$pkgname"
-  install -Dm755 target/release/vortex -t "$pkgdir/usr/bin"
-  install -Dm644 data/io.github.nexusdeveloper902.Vortex.desktop -t "$pkgdir/usr/share/applications"
+  # Installed as vortex-launcher: the AUR name vortex and /usr/bin/vortex belong to an unrelated app.
+  # cargo still builds target/release/vortex.
+  install -Dm755 target/release/vortex "$pkgdir/usr/bin/vortex-launcher"
+  install -Dm644 data/io.github.nexusdeveloper902.Vortex.desktop \
+    "$pkgdir/usr/share/applications/io.github.nexusdeveloper902.Vortex.desktop"
+  sed -i -e 's/^\(Try\)\?Exec=vortex$/\1Exec=vortex-launcher/' \
+    "$pkgdir/usr/share/applications/io.github.nexusdeveloper902.Vortex.desktop"
   install -Dm644 data/io.github.nexusdeveloper902.Vortex.metainfo.xml -t "$pkgdir/usr/share/metainfo"
   install -Dm644 data/icons/hicolor/scalable/apps/io.github.nexusdeveloper902.Vortex.svg \
     -t "$pkgdir/usr/share/icons/hicolor/scalable/apps"

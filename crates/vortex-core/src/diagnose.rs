@@ -166,6 +166,15 @@ impl Confidence {
     }
 }
 
+/// Low byte of Windows exception codes a crashed process exits with, and their names.
+const CRASH_STATUS: &[(i32, &str)] = &[
+    (0x05, "STATUS_ACCESS_VIOLATION (0xC0000005)"),
+    (0x1d, "STATUS_ILLEGAL_INSTRUCTION (0xC000001D)"),
+    (0x94, "STATUS_INTEGER_DIVIDE_BY_ZERO (0xC0000094)"),
+    (0xfd, "STATUS_STACK_OVERFLOW (0xC00000FD)"),
+    (0x09, "STATUS_STACK_BUFFER_OVERRUN (0xC0000409)"),
+];
+
 pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) -> Vec<Finding> {
     let mut out = Vec::new();
     let why = |s: &str| s.to_owned();
@@ -247,6 +256,19 @@ pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) ->
             Class::AppCrash,
             Confidence::Confirmed,
             &format!("terminated by signal {s}"),
+        );
+    }
+    // Wine's own crash report does not reach umu-run's pipes and only the low 8 bits of the
+    // exit code survive, so a crashed game is recognised by the low byte of its NTSTATUS.
+    // A program may exit with these values on purpose: Likely only.
+    if let (Exit::Code(c), RunKind::Launch) = (exit, kind)
+        && let Some((_, name)) = CRASH_STATUS.iter().find(|(low, _)| *low == c)
+    {
+        push(
+            &mut out,
+            Class::AppCrash,
+            Confidence::Likely,
+            &format!("exit code {c} is the low byte of {name}"),
         );
     }
     if out.is_empty() && failed {
@@ -696,5 +718,22 @@ mod tests {
             exit_of(Some(crate::process::Exit::Low8(42))),
             Exit::Code(42)
         );
+    }
+
+    #[test]
+    fn crash_exit_codes_are_likely_app_crash_for_launches_only() {
+        let pre = Preflight::default();
+        let f = classify(RunKind::Launch, Exit::Code(5), &[], &pre);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(
+            (f[0].class, f[0].confidence),
+            (Class::AppCrash, Confidence::Likely)
+        );
+        assert!(f[0].evidence[0].contains("0xC0000005"));
+        let f = classify(RunKind::Launch, Exit::Code(42), &[], &pre);
+        assert_eq!(f[0].class, Class::Unknown);
+        // Installers use small exit codes for ordinary failures.
+        let f = classify(RunKind::Install, Exit::Code(5), &[], &pre);
+        assert_eq!(f[0].class, Class::InstallerFailure);
     }
 }

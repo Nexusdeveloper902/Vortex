@@ -1,17 +1,15 @@
 //! GE-Proton release lookup, download, verification and extraction.
-//!
-//! TODO(M2): switch to `vortex_core::Error` / `HostPath` once M2 merges.
 
-use crate::runtime::{RuntimeError, validate};
+use crate::error::{Error, Result};
+use crate::paths::HostPath;
+use crate::runtime::validate;
+use async_channel::Sender;
 use sha2::{Digest, Sha512};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
-
-type Result<T> = std::result::Result<T, RuntimeError>;
 
 pub const LATEST_URL: &str =
     "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest";
@@ -31,8 +29,12 @@ pub enum Progress {
     Extracting,
 }
 
-fn net(e: impl std::fmt::Display) -> RuntimeError {
-    RuntimeError::Net(e.to_string())
+fn net(e: impl std::fmt::Display) -> Error {
+    Error::Download(e.to_string())
+}
+
+fn no_asset() -> Error {
+    Error::Download("no suitable GE-Proton asset in release".into())
 }
 
 fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
@@ -46,10 +48,7 @@ fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
 /// Pick the x86_64 tarball and its `.sha512sum` from a GitHub release JSON.
 pub fn parse_release(json: &[u8]) -> Result<Release> {
     let v: serde_json::Value = serde_json::from_slice(json).map_err(net)?;
-    let tag = v["tag_name"]
-        .as_str()
-        .ok_or(RuntimeError::NoAsset)?
-        .to_string();
+    let tag = v["tag_name"].as_str().ok_or_else(no_asset)?.to_string();
     let assets: Vec<(&str, &str)> = v["assets"]
         .as_array()
         .into_iter()
@@ -61,12 +60,12 @@ pub fn parse_release(json: &[u8]) -> Result<Release> {
         .find(|(n, _)| {
             n.starts_with("GE-Proton") && n.ends_with(".tar.gz") && !n.contains("aarch64")
         })
-        .ok_or(RuntimeError::NoAsset)?;
+        .ok_or_else(no_asset)?;
     let sum_name = format!("{}.sha512sum", asset_name.trim_end_matches(".tar.gz"));
     let (_, sum_url) = assets
         .iter()
         .find(|(n, _)| *n == sum_name)
-        .ok_or(RuntimeError::NoAsset)?;
+        .ok_or_else(no_asset)?;
     Ok(Release {
         tag,
         asset_name: asset_name.to_string(),
@@ -95,7 +94,7 @@ fn hex(bytes: &[u8]) -> String {
 
 fn check(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {
-        Err(RuntimeError::Cancelled)
+        Err(Error::Cancelled)
     } else {
         Ok(())
     }
@@ -108,13 +107,13 @@ pub fn install(
     runtimes_dir: &Path,
     progress: &Sender<Progress>,
     cancel: &AtomicBool,
-) -> Result<PathBuf> {
-    fs::create_dir_all(runtimes_dir)?;
+) -> Result<HostPath> {
+    fs::create_dir_all(runtimes_dir).map_err(Error::io(runtimes_dir))?;
     let part = runtimes_dir.join(format!(".tmp-{}.part", release.tag));
     let _part = Cleanup(part.clone());
     let actual = download(&release.asset_url, &part, progress, cancel)?;
 
-    let _ = progress.send(Progress::Verifying);
+    let _ = progress.send_blocking(Progress::Verifying);
     let sum = get(&release.sum_url)?
         .body_mut()
         .read_to_string()
@@ -125,24 +124,29 @@ pub fn install(
         .unwrap_or("")
         .to_ascii_lowercase();
     if expected != actual {
-        return Err(RuntimeError::Checksum { expected, actual });
+        return Err(Error::Download(format!(
+            "checksum mismatch: expected {expected}, got {actual}"
+        )));
     }
 
-    let _ = progress.send(Progress::Extracting);
+    let _ = progress.send_blocking(Progress::Extracting);
     let tmp = runtimes_dir.join(format!(".tmp-{}", release.tag));
     let _tmp = Cleanup(tmp.clone());
     let _ = fs::remove_dir_all(&tmp);
-    fs::create_dir(&tmp)?;
+    fs::create_dir(&tmp).map_err(Error::io(&tmp))?;
     let top = extract(&part, &tmp, cancel)?;
     let staged = tmp.join(&top);
     validate(&staged)?;
     let dest = runtimes_dir.join(&top);
     if dest.exists() {
-        return Err(RuntimeError::AlreadyInstalled(dest));
+        return Err(Error::Validation(format!(
+            "{} is already installed",
+            dest.display()
+        )));
     }
     check(cancel)?;
-    fs::rename(&staged, &dest)?;
-    Ok(dest)
+    fs::rename(&staged, &dest).map_err(Error::io(&dest))?;
+    HostPath::new(dest)
 }
 
 /// Stream to `part`, returning the lowercase hex sha512.
@@ -155,28 +159,30 @@ fn download(
     let mut resp = get(url)?;
     let total = resp.body().content_length();
     let mut r = resp.body_mut().as_reader();
-    let mut f = File::create(part)?;
+    let mut f = File::create(part).map_err(Error::io(part))?;
     let (mut h, mut done, mut buf) = (Sha512::new(), 0u64, vec![0u8; 64 * 1024]);
     loop {
         check(cancel)?;
-        let n = r.read(&mut buf)?;
+        let n = r.read(&mut buf).map_err(Error::io(part))?;
         if n == 0 {
             break;
         }
         h.update(&buf[..n]);
-        f.write_all(&buf[..n])?;
+        f.write_all(&buf[..n]).map_err(Error::io(part))?;
         done += n as u64;
-        let _ = progress.send(Progress::Downloading { done, total });
+        let _ = progress.send_blocking(Progress::Downloading { done, total });
     }
-    f.sync_all()?;
+    f.sync_all().map_err(Error::io(part))?;
     Ok(hex(&h.finalize()))
 }
 
 /// Unpack into `into`, rejecting unsafe paths; returns the single top-level dir name.
 fn extract(tarball: &Path, into: &Path, cancel: &AtomicBool) -> Result<String> {
-    let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(File::open(tarball)?));
+    let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(
+        File::open(tarball).map_err(Error::io(tarball))?,
+    ));
     let mut tops = BTreeSet::new();
-    let bad = |e: String| RuntimeError::Archive(e);
+    let bad = |e: String| Error::Download(format!("bad archive: {e}"));
     for e in ar.entries().map_err(|e| bad(e.to_string()))? {
         check(cancel)?;
         let mut e = e.map_err(|e| bad(e.to_string()))?;
@@ -206,7 +212,6 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
     use std::net::TcpListener;
-    use std::sync::mpsc::channel;
     use std::thread;
 
     /// Tar.gz with the given (path, mode, content); raw header bytes so `..` can be written.
@@ -276,10 +281,10 @@ mod tests {
         format!("{}  GE-Proton9-9.tar.gz\n", hex(&Sha512::digest(data)))
     }
 
-    fn run(data: Vec<u8>, sum: String, cancel: bool) -> (Result<PathBuf>, tempfile::TempDir) {
+    fn run(data: Vec<u8>, sum: String, cancel: bool) -> (Result<HostPath>, tempfile::TempDir) {
         let base = serve(data, sum);
         let t = tempfile::tempdir().unwrap();
-        let (tx, _rx) = channel();
+        let (tx, _rx) = async_channel::unbounded();
         let r = install(&rel(&base), t.path(), &tx, &AtomicBool::new(cancel));
         (r, t)
     }
@@ -296,15 +301,15 @@ mod tests {
         let d = good();
         let (r, t) = run(d.clone(), sum_of(&d), false);
         let p = r.unwrap();
-        assert_eq!(p, t.path().join("GE-Proton9-9"));
-        assert!(validate(&p).is_ok());
+        assert_eq!(p.as_path(), t.path().join("GE-Proton9-9"));
+        assert!(validate(p.as_path()).is_ok());
         assert_eq!(left(&t), ["GE-Proton9-9"]);
     }
 
     #[test]
     fn bad_hash_leaves_nothing() {
         let (r, t) = run(good(), sum_of(b"other"), false);
-        assert!(matches!(r, Err(RuntimeError::Checksum { .. })));
+        assert!(matches!(&r, Err(Error::Download(m)) if m.contains("checksum")));
         assert!(left(&t).is_empty());
     }
 
@@ -312,7 +317,7 @@ mod tests {
     fn cancel_leaves_nothing() {
         let d = good();
         let (r, t) = run(d.clone(), sum_of(&d), true);
-        assert!(matches!(r, Err(RuntimeError::Cancelled)));
+        assert!(matches!(r, Err(Error::Cancelled)));
         assert!(left(&t).is_empty());
     }
 
@@ -320,7 +325,10 @@ mod tests {
     fn dotdot_entry_rejected() {
         let d = tarball(&[("GE-Proton9-9/../evil", 0o644, "x")]);
         let (r, t) = run(d.clone(), sum_of(&d), false);
-        assert!(matches!(r, Err(RuntimeError::Archive(_))), "{r:?}");
+        assert!(
+            matches!(&r, Err(Error::Download(m)) if m.contains("bad archive")),
+            "{r:?}"
+        );
         assert!(left(&t).is_empty());
     }
 
@@ -328,7 +336,10 @@ mod tests {
     fn two_top_level_dirs_rejected() {
         let d = tarball(&[("a/proton", 0o755, ""), ("b/proton", 0o755, "")]);
         let (r, t) = run(d.clone(), sum_of(&d), false);
-        assert!(matches!(r, Err(RuntimeError::Archive(_))), "{r:?}");
+        assert!(
+            matches!(&r, Err(Error::Download(m)) if m.contains("bad archive")),
+            "{r:?}"
+        );
         assert!(left(&t).is_empty());
     }
 

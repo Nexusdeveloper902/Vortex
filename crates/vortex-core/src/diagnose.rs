@@ -3,7 +3,7 @@
 //! Findings are plain data, not errors. `Confirmed` is used only when the evidence is
 //! unambiguous (spec 10); heuristics are `Likely`. Patterns live in the tables below.
 
-// TODO(M2): `RunKind` may move to a shared type once db.rs/logs.rs define the run kind.
+/// Coarser than `db::RunKind` on purpose: classification only distinguishes these three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunKind {
     Install,
@@ -19,7 +19,6 @@ pub enum Exit {
 }
 
 /// Facts the caller checked on disk; `None` = not checked.
-// TODO(M2): switch to HostPath fields once paths.rs lands (these are only booleans).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Preflight {
     pub exe_exists: Option<bool>,

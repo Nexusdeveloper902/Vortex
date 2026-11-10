@@ -632,7 +632,7 @@ fn it_e2e_install_to_launch() {
     let before_m = tree_hash(pm.as_path());
     let before_i = tree_hash(pi.as_path());
     let env_s = w.db().get_game(s).unwrap().environment_id;
-    let known = winetricks::list_verbs(&Tools::default(), &ge, &ps).unwrap();
+    let known = winetricks::list_verbs(&Tools::default(), &ge, &w.paths).unwrap();
     say!("winetricks: {} verbs", known.len());
     let (h, rx) = winetricks::install_verb(&w.runs, &w.db, &w.paths, env_s, "win10", &known)
         .unwrap()

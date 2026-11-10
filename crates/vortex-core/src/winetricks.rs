@@ -12,7 +12,6 @@ use crate::process::{Exit, RunEvent, RunHandle, RunSpec, Runs};
 use crate::runner::{Invocation, Program, Tools};
 use async_channel::Receiver;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,10 +114,9 @@ const LIST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// Per-runtime cache of the verb list (it only changes with the runtime).
 static VERB_CACHE: Mutex<BTreeMap<std::path::PathBuf, Vec<Verb>>> = Mutex::new(BTreeMap::new());
 
-/// Runs `umu-run winetricks list-all` in a throwaway scratch prefix (never a game prefix; not
+/// Runs `umu-run winetricks list-all` in the persistent scratch prefix (never a game prefix; not
 /// recorded as a run), with a timeout, and parses it. Results are cached per runtime.
-/// `_prefix` is unused: kept so callers need not change.
-pub fn list_verbs(tools: &Tools, runtime: &HostPath, _prefix: &PrefixDir) -> Result<Vec<Verb>> {
+pub fn list_verbs(tools: &Tools, runtime: &HostPath, paths: &Paths) -> Result<Vec<Verb>> {
     require_support(runtime)?;
     let key = runtime.as_path().to_path_buf();
     if let Some(v) = VERB_CACHE
@@ -129,11 +127,7 @@ pub fn list_verbs(tools: &Tools, runtime: &HostPath, _prefix: &PrefixDir) -> Res
         return Ok(v.clone());
     }
     crate::runner::refuse_root()?;
-    let scratch = std::env::temp_dir().join(format!("vortex-list-verbs-{}", std::process::id()));
-    crate::paths::create_private_dir(&scratch)?;
-    let r = list_in(tools, runtime, &scratch);
-    let _ = std::fs::remove_dir_all(&scratch);
-    let verbs = r?;
+    let verbs = list_in(tools, runtime, paths.scratch_prefix()?)?;
     VERB_CACHE
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -141,15 +135,13 @@ pub fn list_verbs(tools: &Tools, runtime: &HostPath, _prefix: &PrefixDir) -> Res
     Ok(verbs)
 }
 
-fn list_in(tools: &Tools, runtime: &HostPath, scratch: &std::path::Path) -> Result<Vec<Verb>> {
+fn list_in(tools: &Tools, runtime: &HostPath, prefix: PrefixDir) -> Result<Vec<Verb>> {
     use std::io::Read;
-    let wp = scratch.join("pfx");
-    std::fs::create_dir_all(&wp).map_err(Error::io(&wp))?;
     let inv = Invocation {
         program: Program::Winetricks,
         args: vec!["list-all".into()],
-        cwd: HostPath::new(scratch)?,
-        prefix: PrefixDir::new(&wp, Path::new("/nonexistent-home"), &[])?,
+        cwd: prefix.as_host().clone(),
+        prefix: prefix.clone(),
         runtime: runtime.clone(),
         env: vec![],
         verbose_log_dir: None,
@@ -177,6 +169,13 @@ fn list_in(tools: &Tools, runtime: &HostPath, scratch: &std::path::Path) -> Resu
         if start.elapsed() > LIST_TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
+            // Proton's own wineserver, for the scratch prefix only (ARCHITECTURE section 6).
+            if let Ok(ws) = inv.wineserver() {
+                let _ = std::process::Command::new(ws.as_path())
+                    .arg("-k")
+                    .env("WINEPREFIX", prefix.as_path())
+                    .status();
+            }
             return Err(Error::Validation("`winetricks list-all` timed out".into()));
         }
         std::thread::sleep(std::time::Duration::from_millis(50));

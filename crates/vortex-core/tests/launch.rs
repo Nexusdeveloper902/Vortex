@@ -459,7 +459,7 @@ fn installed_from_log_and_filter() {
 fn experimental_style_runtime_is_refused_clearly() {
     let Some(e) = fake_env() else { return };
     let plain = HostPath::new(shared().plain.path()).unwrap();
-    let err = winetricks::list_verbs(&fake_tools(), &plain, &e.prefix).unwrap_err();
+    let err = winetricks::list_verbs(&fake_tools(), &plain, &e.paths).unwrap_err();
     assert!(matches!(err, Error::RuntimeInvalid { .. }));
     assert!(err.to_string().contains("GE-Proton or UMU-Proton"), "{err}");
     let e2 = env_with(fake_tools(), shared().plain.path(), fast());
@@ -483,7 +483,7 @@ fn list_install_records_dependency_and_skips_installed() {
         umu_run: shared().wt.clone(),
     };
     let e = env_with(tools.clone(), shared().runtime.path(), fast());
-    let known = winetricks::list_verbs(&tools, &e.runtime, &e.prefix).unwrap();
+    let known = winetricks::list_verbs(&tools, &e.runtime, &e.paths).unwrap();
     assert_eq!(known.len(), 7);
     let (h, rx) = winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "vcrun2019", &known)
         .unwrap()
@@ -631,7 +631,7 @@ fn it_winetricks_with_ge_proton() {
     std::fs::create_dir_all(&b).unwrap();
     std::fs::write(b.join("winetricks.log"), "vcrun2019\n").unwrap();
 
-    let known = winetricks::list_verbs(&Tools::default(), &e.runtime, &e.prefix).unwrap();
+    let known = winetricks::list_verbs(&Tools::default(), &e.runtime, &e.paths).unwrap();
     eprintln!("{} verbs", known.len());
     assert!(
         known
@@ -664,4 +664,46 @@ fn it_winetricks_with_ge_proton() {
         std::fs::read_to_string(b.join("winetricks.log")).unwrap(),
         "vcrun2019\n"
     );
+}
+
+#[test]
+fn list_verbs_runs_in_scratch_prefix_never_a_game_prefix() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tempfile::tempdir().unwrap();
+    // Fresh runtime path so the per-runtime cache cannot skip the call.
+    let rt = t.path().join("rt");
+    std::fs::create_dir_all(rt.join("files/bin")).unwrap();
+    std::fs::create_dir_all(rt.join("protonfixes")).unwrap();
+    std::fs::write(rt.join("protonfixes/winetricks"), "").unwrap();
+    std::fs::write(rt.join("files/bin/wineserver"), "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(
+        rt.join("files/bin/wineserver"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let rec = t.path().join("wineprefix.txt");
+    let umu = t.path().join("umu");
+    let fixture = Path::new(MANIFEST).join("tests/fixtures/winetricks/list-all.txt");
+    std::fs::write(
+        &umu,
+        format!(
+            "#!/bin/sh\nprintf %s \"$WINEPREFIX\" > '{}'\ncat '{}'\n",
+            rec.display(),
+            fixture.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&umu, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let paths = Paths::under(t.path());
+    let verbs = winetricks::list_verbs(
+        &Tools { umu_run: umu },
+        &HostPath::new(&rt).unwrap(),
+        &paths,
+    )
+    .unwrap();
+    assert!(!verbs.is_empty());
+    let used = std::fs::read_to_string(rec).unwrap();
+    let scratch = paths.scratch_prefix().unwrap();
+    assert_eq!(Path::new(&used), scratch.as_path());
+    assert!(!Path::new(&used).starts_with(paths.prefixes_dir()));
 }

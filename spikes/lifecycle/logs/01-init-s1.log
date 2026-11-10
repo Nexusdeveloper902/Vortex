@@ -1,4 +1,4 @@
-[20:36:36.970] init: umu-run wineboot -u into /tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx
+[20:36:36.970] init: umu-run wineboot -u into /tmp/claude-1000/-home-user-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx
 [20:36:46.672] init: rc=0 in 9.69s; prefix version=11.0-100
 [20:36:46.674] s1(a): no server running. processes before:
     (no wineserver process)
@@ -8,8 +8,8 @@
     (no wineserver process)
 [20:36:46.741] s1(a): socket dir after: lock 
 [20:36:46.742] s1(b): server running (cmd /c ping -n 12)
-[20:36:46.745] s1: umu-run pid=86832 marker=a9ef847b07a1848fd2ff137159ff8acd cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 argv=cmd /c ping -n 12 127.0.0.1
-[20:36:48.834] s1(b): wineserver up at +2.06s: 87024 /home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
+[20:36:46.745] s1: umu-run pid=86832 marker=a9ef847b07a1848fd2ff137159ff8acd cwd=/tmp/claude-1000/-home-user-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 argv=cmd /c ping -n 12 127.0.0.1
+[20:36:48.834] s1(b): wineserver up at +2.06s: 87024 /home/user/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
 [20:37:02.016] s1(b): wineserver -w rc=0 took 13.18s, returned at +15.27s; umu-run alive: yes
 [20:37:02.017] s1(b): wineserver processes now:
     (no wineserver process)

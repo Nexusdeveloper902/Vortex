@@ -116,7 +116,7 @@ fallback in 6.2 is not needed (keep the wineserver barrier as authority anyway).
 
 | Host `current_dir` | How invoked | `%CD%` / `GetCurrentDirectory` | relative `data1.bin` |
 |---|---|---|---|
-| `$HOME/.cache/.../vtest-multi` | `cmd /c Z:\...\setup.bat` | `Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi` | found |
+| `$HOME/.cache/.../vtest-multi` | `cmd /c Z:\...\setup.bat` | `Z:\home\user\.cache\vortex-m1-spike\home\vtest-multi` | found |
 | `/tmp/.../w1/vtest-multi` | same | `Z:\tmp\...\w1\vtest-multi` | found |
 | `<pfx>/drive_c/vtest-multi` | `cmd /c Z:\...\pfx\drive_c\vtest-multi\setup.bat` | **`C:\vtest-multi`** (while `%~dp0` = `Z:\tmp\...\drive_c\vtest-multi\`) | found |
 | `<pfx>/drive_c/vtest-multi` | `cmd /c C:\vtest-multi\setup.bat` | `C:\vtest-multi` | found |
@@ -185,10 +185,10 @@ the marker before declaring Finished.
 Fixture: `fixtures/exe-src/vtest.wxs` → `wixl -a x64` → `vtest.msi` (one file into
 `C:\Program Files\VortexSpike`). Run from cwd = msi's dir with `STEAM_COMPAT_INSTALL_PATH` = msi's dir:
 ```
-msi: msiexec /i Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
+msi: msiexec /i Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
 msi: rc=0; installed file: VTEST-MSI-PAYLOAD
 msi: msiexec /x Z:\...\vtest.msi /qn  -> uninstall rc=0; file still present: no
-msi: msiexec /i /home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
+msi: msiexec /i /home/user/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
 msi: rc=0; installed file: VTEST-MSI-PAYLOAD
 msi: uninstall rc=0; file still present: no
 ```

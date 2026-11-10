@@ -1,5 +1,5 @@
 [20:41:56.682] stop: nested prereq (ping -n 120) plus main cmd ping -n 120; stop after 10 s
-[20:41:56.684] stop: umu-run pid=109210 marker=a669fc782864f91bee42150ab68f4fd7 cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/stop argv=cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\stop\setup.bat
+[20:41:56.684] stop: umu-run pid=109210 marker=a669fc782864f91bee42150ab68f4fd7 cwd=/tmp/claude-1000/-home-user-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/stop argv=cmd /c Z:\tmp\claude-1000\-home-user-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\stop\setup.bat
 [20:42:06.708] stop: marker procs before stop: 21
 [20:42:06.764] stop: wineserver -k rc=0 took 0.05s
 [20:42:06.806] stop: after -k: umu-run alive=no at +0.08s; marker procs=0
@@ -14,11 +14,11 @@
 [20:42:16.954] s6: parent alive: no; umu-run alive: yes ppid=1
 [20:42:16.955] s6: marker processes after parent SIGKILL:
     110012 1 umu-run /usr/bin/python3 /usr/bin/umu-run cmd /c ping -n 40 127.0.0.1
-    110036 110012 srt-bwrap /home/jperez/.local/share/umu/steamrt4/pressure-vessel/libexec/steam-runtime-tools-0/srt-bwrap --args 26 /usr/lib/pressure-vessel/from-host/libexec/steam-runtim
+    110036 110012 srt-bwrap /home/user/.local/share/umu/steamrt4/pressure-vessel/libexec/steam-runtime-tools-0/srt-bwrap --args 26 /usr/lib/pressure-vessel/from-host/libexec/steam-runtim
     110117 110036 pv-adverb /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --fd 12 --regenerate-l
-    110160 110117 python3 python3 /home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/proton waitforexitandrun cmd /c ping -n 40 127.0.0.1
+    110160 110117 python3 python3 /home/user/.local/share/Steam/steamapps/common/Proton - Experimental/proton waitforexitandrun cmd /c ping -n 40 127.0.0.1
     110165 110160 steam.exe c:\windows\system32\steam.exe cmd /c ping -n 40 127.0.0.1
-    110167 110117 wineserver /home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
+    110167 110117 wineserver /home/user/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
     110171 110117 services.exe C:\windows\system32\services.exe
     110174 110117 winedevice.exe C:\windows\system32\winedevice.exe
     110184 110117 plugplay.exe C:\windows\system32\plugplay.exe
@@ -27,7 +27,7 @@
     110402 110117 explorer.exe C:\windows\system32\explorer.exe /desktop
     110418 110117 rpcss.exe C:\windows\system32\rpcss.exe
     110428 110117 tabtip.exe C:\windows\system32\tabtip.exe
-    110430 110117 xalia.exe \\?\Z:\home\jperez\.local\share\Steam\steamapps\common\Proton - Experimental\files\share\wine/../xalia/xalia.exe
+    110430 110117 xalia.exe \\?\Z:\home\user\.local\share\Steam\steamapps\common\Proton - Experimental\files\share\wine/../xalia/xalia.exe
     110446 110117 cmd.exe C:\windows\system32\cmd.exe /c ping -n 40 127.0.0.1
     110459 110117 conhost.exe C:\windows\system32\conhost.exe --server 0x30
     110489 110117 ping ping -n 40 127.0.0.1

@@ -1,4 +1,4 @@
-[20:45:47.974] s8: PROTONPATH=/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental protonfixes/winetricks present: no
-[20:45:47.976] s8: umu-run pid=153438 marker=838e2599b7cb1b64f653e6918dcb4602 cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 argv=winetricks win10
-[20:45:48.516] s8: umu-run winetricks win10 rc=1; winetricks.log: cat: /tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx/winetricks.log: No such file or directory 
-    /tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/s8.err:FileNotFoundError: [Errno 2] No such file or directory: '/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/protonfixes'
+[20:45:47.974] s8: PROTONPATH=/home/user/.local/share/Steam/steamapps/common/Proton - Experimental protonfixes/winetricks present: no
+[20:45:47.976] s8: umu-run pid=153438 marker=838e2599b7cb1b64f653e6918dcb4602 cwd=/tmp/claude-1000/-home-user-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 argv=winetricks win10
+[20:45:48.516] s8: umu-run winetricks win10 rc=1; winetricks.log: cat: /tmp/claude-1000/-home-user-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx/winetricks.log: No such file or directory 
+    /tmp/claude-1000/-home-user-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/s8.err:FileNotFoundError: [Errno 2] No such file or directory: '/home/user/.local/share/Steam/steamapps/common/Proton - Experimental/protonfixes'

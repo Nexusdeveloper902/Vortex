@@ -162,7 +162,7 @@ These flows were observed on screen and also checked in the DB, on disk or in th
 | Play from the library, with args and env reaching the game | yes | [12](screenshots/12-game-running.png) |
 | Library persists after an app restart | yes | [13](screenshots/13-library-after-restart.png) |
 | Game page refreshed after Save (#23) | yes | [14](screenshots/14-game-page-after-save.png) |
-| Runtimes page | yes | [15](screenshots/15-runtimes.png) |
+| Runtimes page | yes | (screenshot removed) |
 | Dependencies dialog, then win10 installed (winetricks.log and DB row) | yes | [16](screenshots/16-dependencies.png) [17](screenshots/17-dependency-run.png) |
 | Failed launch (crash) dialog with findings (#21) | yes | [18](screenshots/18-launch-failed-diagnosis.png) |
 | Logs page and log viewer | yes | [19](screenshots/19-logs.png) [20](screenshots/20-log-viewer.png) |

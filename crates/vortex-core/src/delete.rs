@@ -198,8 +198,9 @@ fn tree_bytes(p: &Path) -> u64 {
 /// shown plan did not (or the rebuild is refused), nothing is deleted. Items that already vanished
 /// are fine, so a failed execution can be retried.
 ///
-/// Order: files first, then database rows. If removing a directory fails, the rows are kept (the
-/// game stays listed, partly deleted) and `execute` can be run again.
+/// Order: files first, then database rows, then the game's desktop entry (if any). If removing a
+/// directory fails, the rows are kept (the game stays listed, partly deleted) and `execute` can be
+/// run again.
 pub fn execute(db: &Db, paths: &Paths, plan: &DeletionPlan) -> Result<()> {
     let fresh = build(db, paths, plan.env_id, plan.game_id)?;
     if fresh.remove_env != plan.remove_env
@@ -244,6 +245,8 @@ pub fn execute(db: &Db, paths: &Paths, plan: &DeletionPlan) -> Result<()> {
     }
     if let Some(g) = plan.game_id {
         db.delete_game(g)?;
+        // The game's menu entry would launch an id that no longer exists.
+        crate::desktop::remove_entry(paths, &g.to_string())?;
     }
     if plan.remove_env {
         db.delete_environment(plan.env_id)?;

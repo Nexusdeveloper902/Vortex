@@ -15,7 +15,9 @@
       Wine prefix.
     </p>
     <p>
-      Vortex is in early development. It does not run games yet.
+      Vortex is an early MVP. It has a game library, an install wizard for installer files and folders,
+      per-game configuration, backup and restore, and log viewing. Its end-to-end verification status is
+      tracked in the project repository.
     </p>
   </description>
   <launchable type="desktop-id">io.github.nexusdeveloper902.Vortex.desktop</launchable>

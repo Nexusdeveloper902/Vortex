@@ -1,42 +1,53 @@
 # Maintainer: NexusDeveloper902
-# Skeleton. Not yet buildable as a release: there is no v0.1.0 tag and no LICENSE file yet.
-# Replace sha256sums=('SKIP') with the real checksum once the tag exists.
-# license: GPL-3.0-or-later is the proposed license from docs/research/stack.md and is not decided yet.
+# Builds Vortex from the git repository. Build from a clean checkout of this directory: makepkg -s
+# License: GPL-3.0-or-later (see the LICENSE file, installed under /usr/share/licenses).
 
-pkgname=vortex
+pkgname=vortex-git
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Install and run Windows games on Linux through Proton (early development)'
+pkgdesc='Install and run Windows games on Linux through Proton (MVP, early development)'
 arch=('x86_64')
 url='https://github.com/Nexusdeveloper902/Vortex'
 license=('GPL-3.0-or-later')
-depends=('gtk4' 'libadwaita' 'sqlite' 'umu-launcher')
-makedepends=('cargo')
-optdepends=('winetricks: dependency installs for Windows games')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+depends=('gtk4' 'libadwaita' 'sqlite' 'umu-launcher' 'winetricks')
+makedepends=('cargo' 'git')
+provides=('vortex')
+conflicts=('vortex')
+# LTO objects from C code (ring's crypto) do not link with rust-lld; !lto keeps the flags plain.
+options=('!lto')
+source=("$pkgname::git+$url.git")
 sha256sums=('SKIP')
 
-_srcdir="Vortex-$pkgver"
+pkgver() {
+  cd "$pkgname"
+  # v0.1.0-3-gabc1234 gives 0.1.0.r3.gabc1234. Without a tag, use the commit count and hash.
+  # (Not `describe | sed || ...`: the pipeline's status is sed's, so the fallback would never run.)
+  if git describe --tags --long --abbrev=7 >/dev/null 2>&1; then
+    git describe --tags --long --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf 'r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  fi
+}
 
 prepare() {
-  cd "$srcdir/$_srcdir"
+  cd "$pkgname"
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-  cd "$srcdir/$_srcdir"
+  cd "$pkgname"
   export CARGO_TARGET_DIR=target
   cargo build --frozen --release -p vortex-gtk
 }
 
 check() {
-  cd "$srcdir/$_srcdir"
+  cd "$pkgname"
   export CARGO_TARGET_DIR=target
   cargo test --frozen -p vortex-core
 }
 
 package() {
-  cd "$srcdir/$_srcdir"
+  cd "$pkgname"
   install -Dm755 target/release/vortex -t "$pkgdir/usr/bin"
   install -Dm644 data/io.github.nexusdeveloper902.Vortex.desktop -t "$pkgdir/usr/share/applications"
   install -Dm644 data/io.github.nexusdeveloper902.Vortex.metainfo.xml -t "$pkgdir/usr/share/metainfo"
@@ -44,4 +55,5 @@ package() {
     -t "$pkgdir/usr/share/icons/hicolor/scalable/apps"
   install -Dm644 data/icons/hicolor/symbolic/apps/io.github.nexusdeveloper902.Vortex-symbolic.svg \
     -t "$pkgdir/usr/share/icons/hicolor/symbolic/apps"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
 }

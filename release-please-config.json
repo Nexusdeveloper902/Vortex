@@ -1,13 +1,15 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "include-component-in-tag": false,
-  "separate-pull-requests": false,
-  "plugins": [
-    "cargo-workspace",
-    { "type": "linked-versions", "groupName": "vortex", "components": ["vortex-core", "vortex-gtk"] }
-  ],
   "packages": {
-    "crates/vortex-core": { "release-type": "rust" },
-    "crates/vortex-gtk": { "release-type": "rust", "changelog-path": "../../CHANGELOG.md" }
+    ".": {
+      "release-type": "simple",
+      "package-name": "vortex",
+      "extra-files": [
+        { "type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version" },
+        { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name=='vortex-core')].version" },
+        { "type": "toml", "path": "Cargo.lock", "jsonpath": "$.package[?(@.name=='vortex-gtk')].version" }
+      ]
+    }
   }
 }

@@ -19,8 +19,12 @@ sha256sums=('SKIP')
 pkgver() {
   cd "$pkgname"
   # v0.1.0-3-gabc1234 gives 0.1.0.r3.gabc1234. Without a tag, use the commit count and hash.
-  git describe --long --abbrev=7 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' \
-    || printf 'r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  # (Not `describe | sed || ...`: the pipeline's status is sed's, so the fallback would never run.)
+  if git describe --tags --long --abbrev=7 >/dev/null 2>&1; then
+    git describe --tags --long --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf 'r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  fi
 }
 
 prepare() {

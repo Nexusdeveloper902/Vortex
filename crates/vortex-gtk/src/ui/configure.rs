@@ -282,6 +282,7 @@ pub fn open(state: &Rc<AppState>, game_id: i64) {
     {
         let state = state.clone();
         let old_rt = env.runtime_path.clone();
+        let env_id = env.id;
         save.connect_clicked(move |_| {
             let lines: Vec<String> = rows.borrow().iter().map(|r| r.text().to_string()).collect();
             let mut vars = match parse_env_lines(&lines) {
@@ -301,6 +302,34 @@ pub fn open(state: &Rc<AppState>, game_id: i64) {
                     Some(s.trim().to_string())
                 }
             };
+            if state.runs.active(env_id).is_some() {
+                return state.toast("Stop the running game before saving changes");
+            }
+            for (label, v) in [
+                ("executable", nz(exe.text())),
+                ("working folder", nz(wd.text())),
+            ] {
+                let Some(v) = v else { continue };
+                let p = std::path::Path::new(&v);
+                let ok = if label == "executable" {
+                    p.is_file()
+                        && p.extension().is_some_and(|e| {
+                            ["exe", "bat", "cmd", "com"]
+                                .iter()
+                                .any(|x| e.eq_ignore_ascii_case(x))
+                        })
+                } else {
+                    p.is_dir()
+                };
+                if !ok {
+                    return state.toast(&format!("The {label} is not valid: {v}"));
+                }
+            }
+            if let Some(r) = runtimes.borrow().get(combo.selected() as usize)
+                && vortex_core::runtime::validate(r.path.as_path()).is_err()
+            {
+                return state.toast("The selected Proton runtime is not valid");
+            }
             let res = (|| {
                 let db = state.db();
                 db.update_game_settings(

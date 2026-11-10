@@ -161,6 +161,7 @@ impl RunView {
             }
             RunEvent::Finished(o) => {
                 self.status.set_subtitle(&outcome_label(o));
+                self.procs.set_subtitle("None");
                 self.stop_btn.set_sensitive(false);
                 self.mark_btn.set_sensitive(false);
             }

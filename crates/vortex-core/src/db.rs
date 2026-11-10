@@ -935,6 +935,20 @@ impl Db {
     }
 }
 
+impl Db {
+    /// Runs of an environment that belong to `game_id` or to no game (Run EXE, winetricks).
+    pub fn runs_for_environment(&self, env: i64, game_id: i64) -> Result<Vec<Run>> {
+        collect(
+            &self.conn,
+            &format!(
+                "{RUN_SELECT} WHERE environment_id=?1 AND (game_id=?2 OR game_id IS NULL) ORDER BY started_at DESC, id DESC"
+            ),
+            [env, game_id],
+            run_row,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -193,3 +193,18 @@ fn db_and_dirs_are_private() {
     assert_eq!(mode(paths.data_dir()), 0o700);
     assert_eq!(mode(&paths.db_file()), 0o600);
 }
+
+#[test]
+fn runs_for_environment_includes_gameless_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, mut db) = open(&tmp);
+    let (env, game, inst) = seed(&mut db);
+    db.insert_run(&new_run(env, game, inst, "a")).unwrap();
+    let mut loose = new_run(env, game, inst, "b");
+    loose.kind = RunKind::Launch;
+    loose.game_id = None;
+    loose.install_id = None;
+    db.insert_run(&loose).unwrap();
+    assert_eq!(db.runs_for_game(game).unwrap().len(), 1);
+    assert_eq!(db.runs_for_environment(env, game).unwrap().len(), 2);
+}

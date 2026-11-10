@@ -310,7 +310,12 @@ pub fn restore_dialog(state: &Rc<AppState>, env_id: i64) {
 // ---- logs ----
 
 pub fn logs_page(state: &Rc<AppState>, game_id: i64) {
-    let runs = state.db().runs_for_game(game_id).unwrap_or_default();
+    let runs = {
+        let db = state.db();
+        db.get_game(game_id)
+            .and_then(|g| db.runs_for_environment(g.environment_id, game_id))
+            .unwrap_or_default()
+    };
     let list = gtk4::ListBox::builder()
         .selection_mode(gtk4::SelectionMode::None)
         .css_classes(["boxed-list"])

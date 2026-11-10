@@ -145,6 +145,12 @@ impl Radios {
     }
 }
 
+macro_rules! up {
+    ($w:ident) => {
+        let Some($w) = $w.upgrade() else { return };
+    };
+}
+
 struct Wizard {
     state: Rc<AppState>,
     dialog: adw::Dialog,
@@ -164,7 +170,7 @@ struct Wizard {
 pub fn open(state: &Rc<AppState>) {
     let w = Wizard::new(state);
     w.nav.add(&w.source_page());
-    w.dialog.present(Some(&state.window));
+    w.present();
 }
 
 /// Continue an interrupted, failed or half-finished install of a game.
@@ -186,10 +192,20 @@ pub fn resume(state: &Rc<AppState>, game_id: i64) {
     w.install_id.set(install.id);
     w.nav.add(&w.progress_page());
     w.show_state(install.state, &[]);
-    w.dialog.present(Some(&state.window));
+    w.present();
 }
 
 impl Wizard {
+    /// Shows the dialog. The wizard is held by the dialog's `closed` handler only until close, and
+    /// widget closures hold it weakly, so no reference cycle outlives the dialog.
+    fn present(self: &Rc<Self>) {
+        let keep = RefCell::new(Some(self.clone()));
+        self.dialog.connect_closed(move |_| {
+            keep.take();
+        });
+        self.dialog.present(Some(&self.state.window));
+    }
+
     fn new(state: &Rc<AppState>) -> Rc<Self> {
         let nav = adw::NavigationView::new();
         let dialog = adw::Dialog::builder()
@@ -227,10 +243,15 @@ impl Wizard {
         let file = pill("Choose a file...", true);
         let dir = pill("Choose a folder...", false);
         for (b, folder) in [(&file, false), (&dir, true)] {
-            let w = self.clone();
+            let w = Rc::downgrade(self);
             b.connect_clicked(move |_| {
-                let w2 = w.clone();
-                let cb = move |p: PathBuf| w2.analyze(p);
+                up!(w);
+                let w2 = Rc::downgrade(&w);
+                let cb = move |p: PathBuf| {
+                    if let Some(w) = w2.upgrade() {
+                        w.analyze(p)
+                    }
+                };
                 if folder {
                     dialogs::pick_folder(&w.state, "Installer folder", cb);
                 } else {
@@ -304,8 +325,9 @@ impl Wizard {
         col.append(&radios.list);
         col.append(&next);
         let chosen = radios.chosen.clone();
-        let w = self.clone();
+        let w = Rc::downgrade(self);
         next.connect_clicked(move |_| {
+            up!(w);
             *w.installer.borrow_mut() = chosen.borrow().clone();
             w.nav.push(&w.name_page());
         });
@@ -336,8 +358,9 @@ impl Wizard {
             .tooltip_text("Choose folder")
             .build();
         {
-            let (w, loc) = (self.clone(), loc.clone());
+            let (w, loc) = (Rc::downgrade(self), loc.clone());
             browse.connect_clicked(move |_| {
+                up!(w);
                 let loc = loc.clone();
                 dialogs::pick_folder(&w.state, "Install folder", move |p| {
                     loc.set_text(&p.to_string_lossy())
@@ -353,8 +376,9 @@ impl Wizard {
         col.append(&gtk4::Label::builder().label("Leave the folder empty to let the installer use its default location inside the game's prefix.").css_classes(["dim-label", "caption"]).wrap(true).xalign(0.0).build());
         let go = pill("Install", true);
         col.append(&go);
-        let w = self.clone();
+        let w = Rc::downgrade(self);
         go.connect_clicked(move |b| {
+            up!(w);
             let Some(rt) = runtimes
                 .borrow()
                 .get(combo.selected() as usize)
@@ -415,22 +439,25 @@ impl Wizard {
         col.append(&self.retry);
         col.append(&self.select);
         {
-            let w = self.clone();
+            let w = Rc::downgrade(self);
             self.view.stop_btn.connect_clicked(move |b| {
+                up!(w);
                 b.set_sensitive(false);
                 if let Err(e) = w.state.installs.cancel(w.install_id.get()) {
                     w.state.toast(&e.to_string());
                 }
             });
-            let w = self.clone();
+            let w = Rc::downgrade(self);
             self.view.mark_btn.connect_clicked(move |_| {
+                up!(w);
                 if let Err(e) = w.state.installs.mark_run_finished(w.install_id.get()) {
                     w.state.toast(&e.to_string());
                 }
             });
-            let w = self.clone();
-            self.retry
-                .connect_clicked(move |_| match w.state.installs.retry(w.install_id.get()) {
+            let w = Rc::downgrade(self);
+            self.retry.connect_clicked(move |_| {
+                up!(w);
+                match w.state.installs.retry(w.install_id.get()) {
                     Ok(rx) => {
                         w.view.reset();
                         while let Some(c) = w.findings.first_child() {
@@ -442,13 +469,19 @@ impl Wizard {
                         w.consume(rx);
                     }
                     Err(e) => w.state.toast(&e.to_string()),
-                });
-            let w = self.clone();
-            self.select.connect_clicked(move |_| {
-                match w.state.installs.mark_installer_finished(w.install_id.get()) {
-                    Ok(c) => w.nav.push(&w.exe_page(c)),
-                    Err(e) => w.state.toast(&e.to_string()),
                 }
+            });
+            let w = Rc::downgrade(self);
+            self.select.connect_clicked(move |_| {
+                up!(w);
+                glib::spawn_future_local(async move {
+                    let (installs, id) = (w.state.installs.clone(), w.install_id.get());
+                    match blocking(move || installs.mark_installer_finished(id)).await {
+                        Some(Ok(c)) => w.nav.push(&w.exe_page(c)),
+                        Some(Err(e)) => w.state.toast(&e.to_string()),
+                        None => {}
+                    }
+                });
             });
         }
         let p = step("Installing", &col, false);
@@ -459,6 +492,7 @@ impl Wizard {
     fn show_state(self: &Rc<Self>, s: InstallState, cands: &[ExeCandidate]) {
         self.status.set_text(install_state_label(s));
         let resting = is_resting(s);
+        self.dialog.set_can_close(resting);
         let again = matches!(
             s,
             InstallState::Failed | InstallState::Cancelled | InstallState::Interrupted
@@ -470,15 +504,18 @@ impl Wizard {
             self.view.mark_btn.set_sensitive(false);
         }
         if s == InstallState::SelectExe {
-            let c = if cands.is_empty() {
-                self.state
-                    .installs
-                    .exe_candidates(self.install_id.get())
-                    .unwrap_or_default()
-            } else {
-                cands.to_vec()
-            };
-            self.nav.push(&self.exe_page(c));
+            let (w, cands) = (self.clone(), cands.to_vec());
+            glib::spawn_future_local(async move {
+                let c = if cands.is_empty() {
+                    let (installs, id) = (w.state.installs.clone(), w.install_id.get());
+                    blocking(move || installs.exe_candidates(id).unwrap_or_default())
+                        .await
+                        .unwrap_or_default()
+                } else {
+                    cands
+                };
+                w.nav.push(&w.exe_page(c));
+            });
         }
     }
 
@@ -523,8 +560,9 @@ impl Wizard {
         col.append(&radios.list);
         let browse = pill("Browse...", false);
         {
-            let (w, radios) = (self.clone(), radios.clone());
+            let (w, radios) = (Rc::downgrade(self), radios.clone());
             browse.connect_clicked(move |_| {
+                up!(w);
                 let radios = radios.clone();
                 dialogs::pick_file(&w.state, "Game executable", move |p| {
                     if let Ok(h) = HostPath::new(&p) {
@@ -542,29 +580,39 @@ impl Wizard {
             .build();
         col.append(&failed);
         {
-            let w = self.clone();
+            let w = Rc::downgrade(self);
             failed.connect_clicked(move |_| {
+                up!(w);
                 if let Err(e) = w.state.installs.mark_failed(w.install_id.get()) {
                     return w.state.toast(&e.to_string());
                 }
                 w.nav.pop();
                 w.show_state(InstallState::Failed, &[]);
             });
-            let w = self.clone();
-            confirm.connect_clicked(move |_| {
+            let w = Rc::downgrade(self);
+            confirm.connect_clicked(move |b| {
+                up!(w);
                 let Some(exe) = radios.chosen.borrow().clone() else {
                     return;
                 };
-                match w.state.installs.confirm_exe(w.install_id.get(), &exe, None) {
-                    Ok(reg) => {
-                        if let Some(Err(e)) = &reg.desktop_entry {
-                            w.state
-                                .toast(&format!("Added, but the desktop entry failed: {e}"));
+                b.set_sensitive(false);
+                let b = b.clone();
+                glib::spawn_future_local(async move {
+                    let (installs, id) = (w.state.installs.clone(), w.install_id.get());
+                    let res = blocking(move || installs.confirm_exe(id, &exe, None)).await;
+                    b.set_sensitive(true);
+                    match res {
+                        Some(Ok(reg)) => {
+                            if let Some(Err(e)) = &reg.desktop_entry {
+                                w.state
+                                    .toast(&format!("Added, but the desktop entry failed: {e}"));
+                            }
+                            w.nav.push(&w.done_page(reg.game_id));
                         }
-                        w.nav.push(&w.done_page(reg.game_id));
+                        Some(Err(e)) => w.state.toast(&e.to_string()),
+                        None => {}
                     }
-                    Err(e) => w.state.toast(&e.to_string()),
-                }
+                });
             });
         }
         step("Executable", &col, true)
@@ -579,8 +627,9 @@ impl Wizard {
             .description("It is now in your library.")
             .child(&open)
             .build();
-        let w = self.clone();
+        let w = Rc::downgrade(self);
         open.connect_clicked(move |_| {
+            up!(w);
             w.dialog.close();
             w.state.nav.pop_to_tag("library");
             game_page::open(&w.state, game_id);

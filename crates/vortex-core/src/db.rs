@@ -804,6 +804,22 @@ fn backup_row(r: &Row) -> rusqlite::Result<Backup> {
     })
 }
 
+// ---- M7 (process) ----
+
+impl Db {
+    /// The log path depends on the run id, so it is set right after `insert_run`.
+    pub fn set_run_log_path(&self, id: i64, log_path: &str) -> Result<()> {
+        self.expect_one(
+            self.conn.execute(
+                "UPDATE runs SET log_path=?2 WHERE id=?1",
+                params![id, log_path],
+            )?,
+            "run",
+            id,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

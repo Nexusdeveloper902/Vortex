@@ -13,6 +13,8 @@ depends=('gtk4' 'libadwaita' 'sqlite' 'umu-launcher' 'winetricks')
 makedepends=('cargo' 'git')
 provides=('vortex')
 conflicts=('vortex')
+# LTO objects from C code (ring's crypto) do not link with rust-lld; !lto keeps the flags plain.
+options=('!lto')
 source=("$pkgname::git+$url.git")
 sha256sums=('SKIP')
 

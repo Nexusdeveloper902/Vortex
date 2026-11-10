@@ -11,7 +11,11 @@ jobs:
   arch:
     name: fmt, clippy, test (archlinux)
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    container:
+      image: archlinux:latest
+      # PID 1 must reap orphans: the process tests leave setsid'd children whose exited
+      # zombies would otherwise keep the fake wineserver barrier (kill -0) alive forever.
+      options: --init
     steps:
       - name: Install toolchain and GTK dependencies
         run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita sqlite
@@ -35,7 +39,9 @@ jobs:
   core:
     name: vortex-core without GTK
     runs-on: ubuntu-latest
-    container: rust:latest
+    container:
+      image: rust:latest
+      options: --init
     steps:
       - uses: actions/checkout@v4
       - name: vortex-core must not depend on gtk4, glib, gio or libadwaita

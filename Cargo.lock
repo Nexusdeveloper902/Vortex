@@ -1293,9 +1293,11 @@ dependencies = [
 name = "vortex-gtk"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "gtk4",
  "libadwaita",
  "rustix",
+ "serde_json",
  "vortex-core",
 ]
 

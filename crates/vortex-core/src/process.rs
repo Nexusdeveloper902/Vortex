@@ -328,7 +328,13 @@ impl Runs {
             (Some(p), Some(s)) if proc_start_time(p) == Some(s) => i32::try_from(p).ok(),
             _ => None,
         };
-        let left = stop_sequence(&ws, &prefix, &run.marker, umu, self.timing.stop_grace);
+        let left = stop_sequence(
+            ws.as_path(),
+            &prefix,
+            &run.marker,
+            umu,
+            self.timing.stop_grace,
+        );
         if left.is_empty() {
             lock(&self.db).finish_run(run_id, RunState::Stopped, None, false)?;
         }

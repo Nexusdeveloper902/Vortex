@@ -181,16 +181,12 @@ impl Invocation {
 
     /// Validates the runtime and returns its `wineserver` (used for the barrier and stop).
     pub fn wineserver(&self) -> Result<HostPath> {
-        let invalid = |reason: String| Error::RuntimeInvalid {
-            path: self.runtime.as_path().to_path_buf(),
-            reason,
-        };
-        let rt =
-            crate::runtime::validate(self.runtime.as_path()).map_err(|e| invalid(e.to_string()))?;
-        let ws = rt
+        crate::runtime::validate(self.runtime.as_path())?
             .wineserver()
-            .ok_or_else(|| invalid("no files/bin/wineserver or dist/bin/wineserver".into()))?;
-        HostPath::new(ws)
+            .ok_or_else(|| Error::RuntimeInvalid {
+                path: self.runtime.as_path().to_path_buf(),
+                reason: "no files/bin/wineserver or dist/bin/wineserver".into(),
+            })
     }
 
     /// Builds the Command. Pure except for the root check and reading `HOME`.

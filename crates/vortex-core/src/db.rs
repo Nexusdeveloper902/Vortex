@@ -804,6 +804,18 @@ fn backup_row(r: &Row) -> rusqlite::Result<Backup> {
     })
 }
 
+impl Db {
+    /// Every install row across all games (used to protect installer sources).
+    pub fn list_installs(&self) -> Result<Vec<Install>> {
+        collect(
+            &self.conn,
+            &format!("{INSTALL_SELECT} ORDER BY id"),
+            [],
+            install_row,
+        )
+    }
+}
+
 // ---- M7 (process) ----
 
 impl Db {

@@ -61,7 +61,7 @@ impl Page {
         }
         let current = self
             .state
-            .db
+            .db()
             .get_setting(KEY_DEFAULT_RUNTIME)
             .ok()
             .flatten();
@@ -87,7 +87,7 @@ impl Page {
             let (state, path) = (self.state.clone(), p.to_string_lossy().into_owned());
             radio.connect_toggled(move |b| {
                 if b.is_active()
-                    && let Err(e) = state.db.set_setting(KEY_DEFAULT_RUNTIME, &path)
+                    && let Err(e) = state.db().set_setting(KEY_DEFAULT_RUNTIME, &path)
                 {
                     state.toast(&e.to_string());
                 }
@@ -156,7 +156,14 @@ pub fn build(state: &Rc<AppState>) -> gtk4::Widget {
             (page.clone(), cancel_flag, progress, bar, cancel);
         move |btn| {
             let state = &page.state;
-            if state.db.get_setting(KEY_OFFLINE).ok().flatten().as_deref() == Some("1") {
+            if state
+                .db()
+                .get_setting(KEY_OFFLINE)
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("1")
+            {
                 return state.toast("Offline mode is on. Turn it off in Preferences to download.");
             }
             let cancelled = Arc::new(AtomicBool::new(false));

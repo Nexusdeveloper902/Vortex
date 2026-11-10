@@ -16,14 +16,21 @@ fn dir_row(state: &Rc<AppState>, title: &str, key: &'static str) -> adw::EntryRo
         .title(title)
         .show_apply_button(true)
         .build();
-    row.set_text(&state.db.get_setting(key).ok().flatten().unwrap_or_default());
+    row.set_text(
+        &state
+            .db()
+            .get_setting(key)
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
+    );
     let state = state.clone();
     row.connect_apply(move |r| {
         let v = r.text();
         if !v.is_empty() && !v.starts_with('/') {
             return state.toast("Use an absolute path");
         }
-        if let Err(e) = state.db.set_setting(key, &v) {
+        if let Err(e) = state.db().set_setting(key, &v) {
             state.toast(&e.to_string());
         }
     });
@@ -54,13 +61,21 @@ pub fn present(state: &Rc<AppState>) {
     let offline = adw::SwitchRow::builder()
         .title("Offline mode")
         .subtitle("Never download anything")
-        .active(state.db.get_setting(KEY_OFFLINE).ok().flatten().as_deref() == Some("1"))
+        .active(
+            state
+                .db()
+                .get_setting(KEY_OFFLINE)
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("1"),
+        )
         .build();
     {
         let state = state.clone();
         offline.connect_active_notify(move |s| {
             if let Err(e) = state
-                .db
+                .db()
                 .set_setting(KEY_OFFLINE, if s.is_active() { "1" } else { "0" })
             {
                 state.toast(&e.to_string());
@@ -91,14 +106,14 @@ pub fn present(state: &Rc<AppState>) {
         } else {
             "Used for new games"
         });
-        let cur = state2.db.get_setting(KEY_DEFAULT_RUNTIME).ok().flatten();
+        let cur = state2.db().get_setting(KEY_DEFAULT_RUNTIME).ok().flatten();
         if let Some(i) = paths.iter().position(|p| Some(p) == cur.as_ref()) {
             combo2.set_selected(i as u32);
         }
         let state3 = state2.clone();
         combo2.connect_selected_notify(move |c| {
             if let Some(p) = paths.get(c.selected() as usize)
-                && let Err(e) = state3.db.set_setting(KEY_DEFAULT_RUNTIME, p)
+                && let Err(e) = state3.db().set_setting(KEY_DEFAULT_RUNTIME, p)
             {
                 state3.toast(&e.to_string());
             }

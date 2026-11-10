@@ -22,6 +22,9 @@ mod imp {
         /// Unix seconds of the newest launch run, 0 if never.
         #[property(get, set)]
         last_played: Cell<i64>,
+        /// Display name of the game's Proton runtime (folder name).
+        #[property(get, set)]
+        runtime: RefCell<String>,
     }
 
     #[glib::object_subclass]
@@ -39,12 +42,13 @@ glib::wrapper! {
 }
 
 impl GameObject {
-    pub fn new(g: &Game, last_played: Option<i64>) -> Self {
+    pub fn new(g: &Game, last_played: Option<i64>, runtime: &str) -> Self {
         glib::Object::builder()
             .property("id", g.id)
             .property("name", &g.name)
             .property("status", g.status.as_str())
             .property("last-played", last_played.unwrap_or(0))
+            .property("runtime", runtime)
             .build()
     }
 }
@@ -54,7 +58,7 @@ pub fn status_label(status: &str) -> &'static str {
     match status {
         "installing" => "Installing",
         "installed" => "Installed",
-        "failed" => "Install failed",
+        "failed" => "Needs attention",
         "interrupted" => "Interrupted",
         _ => "Unknown",
     }
@@ -67,7 +71,7 @@ mod tests {
     #[test]
     fn labels() {
         assert_eq!(status_label("installed"), "Installed");
-        assert_eq!(status_label("failed"), "Install failed");
+        assert_eq!(status_label("failed"), "Needs attention");
         assert_eq!(status_label("bogus"), "Unknown");
     }
 }

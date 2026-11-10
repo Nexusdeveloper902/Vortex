@@ -189,9 +189,9 @@ impl Invocation {
             })
     }
 
-    /// Builds the Command. Pure except for the root check and reading `HOME`.
+    /// Builds the Command. Pure except for reading `HOME`; the root refusal is in
+    /// [`Invocation::preflight`], which `process::Runs::start` always runs before spawning.
     pub fn command(&self, tools: &Tools, marker: &str) -> Result<Command> {
-        refuse_root()?;
         validate_env(&self.env)?;
         let mut c = Command::new(&tools.umu_run);
         c.args(self.argv())

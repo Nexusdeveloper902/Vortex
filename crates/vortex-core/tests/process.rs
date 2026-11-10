@@ -97,14 +97,25 @@ fn env_with(tools: Tools, runtime: &Path, timing: Timing, tmp: tempfile::TempDir
     }
 }
 
-fn fake_env() -> Env {
+/// `None` when running as root (e.g. CI containers): then the only thing to verify is that the
+/// runner refuses to spawn (CLAUDE.md rule 2), which this asserts before returning.
+fn fake_env() -> Option<Env> {
     let rt = fake_runtime();
     let tools = Tools {
         umu_run: Path::new(MANIFEST).join("tests/fake-umu-run"),
     };
     let e = env_with(tools, rt, fast(), tempfile::tempdir().unwrap());
     std::fs::write(e.dir.as_path().join("setup.exe"), "MZ").unwrap();
-    e
+    if rustix::process::geteuid().is_root() {
+        match e.fake("exit:0") {
+            Err(Error::Validation(m)) if m.contains("root") => {}
+            other => panic!("as root, start must refuse: {:?}", other.map(|_| ())),
+        }
+        assert!(e.db.lock().unwrap().active_runs().unwrap().is_empty());
+        eprintln!("running as root: verified the spawn refusal only");
+        return None;
+    }
+    Some(e)
 }
 
 impl Env {
@@ -173,7 +184,7 @@ const T: Duration = Duration::from_secs(20);
 
 #[test]
 fn records_argv_env_cwd_with_spaces_no_shell() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let out = e.dir.as_path().join("rec.out");
     let inv = e.inv(
         e.setup_exe(),
@@ -201,7 +212,7 @@ fn records_argv_env_cwd_with_spaces_no_shell() {
 
 #[test]
 fn reserved_env_and_missing_exe_rejected_before_anything_runs() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     for k in [
         "WINEPREFIX",
         "STEAM_COMPAT_DATA_PATH",
@@ -234,7 +245,7 @@ fn reserved_env_and_missing_exe_rejected_before_anything_runs() {
 
 #[test]
 fn lines_in_order_redacted_in_ui_and_log() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let (h, rx) = e.fake("lines:200,secret").unwrap();
     let (evs, _) = collect(&rx, T);
     let lines: Vec<&str> = evs
@@ -266,7 +277,7 @@ fn lines_in_order_redacted_in_ui_and_log() {
 
 #[test]
 fn exit_code_propagates_as_low_8_bits() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let (h, rx) = e.fake("exit:7").unwrap();
     let (_, o) = collect(&rx, T);
     assert_eq!(
@@ -290,7 +301,7 @@ fn exit_code_propagates_as_low_8_bits() {
 
 #[test]
 fn orphan_holds_finished_until_wineserver_barrier_ends() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let t0 = Instant::now();
     let (h, rx) = e.fake("orphan:2").unwrap();
     let mut saw_waiting_row = false;
@@ -333,7 +344,7 @@ fn orphan_holds_finished_until_wineserver_barrier_ends() {
 
 #[test]
 fn stray_marker_process_makes_run_uncertain_then_finishes() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let (h, rx) = e.fake("stray:2").unwrap();
     let (evs, o) = collect(&rx, T);
     let left = evs
@@ -353,7 +364,7 @@ fn stray_marker_process_makes_run_uncertain_then_finishes() {
 
 #[test]
 fn stop_with_sigterm_ignored_leaves_no_marker_process() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let (h, rx) = e.fake("trap").unwrap();
     std::thread::sleep(Duration::from_millis(400));
     assert!(!scan_marker(h.marker()).is_empty());
@@ -375,7 +386,7 @@ fn stop_with_sigterm_ignored_leaves_no_marker_process() {
 
 #[test]
 fn second_run_in_same_environment_is_busy() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let (h, rx) = e.fake("sleep:5").unwrap();
     assert!(matches!(e.fake("exit:0"), Err(Error::Busy(id)) if id == e.env_id));
     assert!(e.runs.active(e.env_id).is_some());
@@ -389,7 +400,7 @@ fn second_run_in_same_environment_is_busy() {
 
 #[test]
 fn mark_finished_then_stop_detached() {
-    let e = fake_env();
+    let Some(e) = fake_env() else { return };
     let (h, rx) = e.fake("sleep:30").unwrap();
     std::thread::sleep(Duration::from_millis(200));
     h.mark_finished();

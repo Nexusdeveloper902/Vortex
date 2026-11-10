@@ -1,0 +1,94 @@
+[20:37:59.384] delayed: umu-run pid=91024 marker=c762880a9529c9d524ee616890a4d734 cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/delayed argv=cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\delayed\setup.bat
+[20:38:16.433] delayed: umu-run exited rc=0 at +17.05s; done-file present: yes
+[20:38:16.434] delayed: marker processes right after umu-run exit:
+[20:38:16.462] delayed: wineserver -w rc=0 took 0.00s, returned at +17.08s; done-file present: yes
+[20:38:16.465] delayed: stage2.done mtime at +16.95s
+[20:38:16.674] delayed: monitor (t = seconds since launch):
+       0.00 + pid=91024 ppid=91010 marker=yes desc_of_umu=no comm=umu-run cmd=/usr/bin/python3 /usr/bin/umu-run cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1
+       0.51 + pid=91050 ppid=91024 marker=yes desc_of_umu=yes comm=pressure-vessel cmd=/home/jperez/.local/share/umu/steamrt4/pressure-vessel/bin/pressure-vessel-wrap --env-if-host=PRESSURE_VESSEL_APP_LD_LIBRARY_PATH=/opt/rocm/
+       1.52 + pid=91136 ppid=91050 marker=yes desc_of_umu=yes comm=pv-adverb cmd=/usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --
+       1.52 + pid=91160 ppid=91136 marker=yes desc_of_umu=yes comm=python3 cmd=python3 /home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/proton waitforexitandrun cmd /c Z:\tmp\claude-1000\-home-jper
+       1.52 + pid=91162 ppid=91160 marker=yes desc_of_umu=yes comm=wine cmd=/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib//wine/x86_64-unix/wine c:\windows\system32\steam.exe cmd /c
+       1.52 + pid=91164 ppid=91136 marker=yes desc_of_umu=yes comm=wineserver cmd=/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
+       1.52 + pid=91166 ppid=91136 marker=yes desc_of_umu=yes comm=wineboot.exe cmd=C:\windows\system32\wineboot.exe --init
+       1.52 + pid=91168 ppid=91136 marker=yes desc_of_umu=yes comm=services.exe cmd=C:\windows\system32\services.exe
+       1.52 + pid=91171 ppid=91136 marker=yes desc_of_umu=yes comm=winedevice.exe cmd=C:\windows\system32\winedevice.exe
+       1.52 + pid=91181 ppid=91136 marker=yes desc_of_umu=yes comm=plugplay.exe cmd=C:\windows\system32\plugplay.exe
+       2.03 + pid=91197 ppid=91136 marker=yes desc_of_umu=yes comm=svchost.exe cmd=C:\windows\system32\svchost.exe -k LocalServiceNetworkRestricted
+       2.03 + pid=91204 ppid=91136 marker=yes desc_of_umu=yes comm=winedevice.exe cmd=C:\windows\system32\winedevice.exe
+       3.55 + pid=91311 ppid=91136 marker=yes desc_of_umu=yes comm=explorer.exe cmd=C:\windows\system32\explorer.exe /desktop
+       3.55 + pid=91327 ppid=91136 marker=yes desc_of_umu=yes comm=rpcss.exe cmd=C:\windows\system32\rpcss.exe
+       3.55 + pid=91337 ppid=91136 marker=yes desc_of_umu=yes comm=tabtip.exe cmd=C:\windows\system32\tabtip.exe
+       3.55 + pid=91339 ppid=91136 marker=yes desc_of_umu=yes comm=xalia.exe cmd=\\?\Z:\home\jperez\.local\share\Steam\steamapps\common\Proton - Experimental\files\share\wine/../xalia/xalia.exe
+       3.55 + pid=91355 ppid=91136 marker=yes desc_of_umu=yes comm=cmd.exe cmd=C:\windows\system32\cmd.exe /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\delayed\s
+       3.55 + pid=91369 ppid=91136 marker=yes desc_of_umu=yes comm=conhost.exe cmd=C:\windows\system32\conhost.exe --server 0x30
+       3.55 - pid=91166 comm=wineboot.exe
+       4.06 + pid=91462 ppid=91136 marker=yes desc_of_umu=yes comm=cmd cmd=cmd /c stage1.bat
+       4.06 + pid=91494 ppid=91136 marker=yes desc_of_umu=yes comm=conhost.exe cmd=C:\windows\system32\conhost.exe --server 0x30
+       4.06 + pid=91516 ppid=91136 marker=yes desc_of_umu=yes comm=ping cmd=ping -n 5 127.0.0.1
+       4.06 - pid=91355 comm=cmd.exe
+       4.06 - pid=91369 comm=conhost.exe
+       8.12 + pid=91699 ppid=91136 marker=yes desc_of_umu=yes comm=cmd cmd=cmd /c stage2.bat
+       8.12 + pid=91701 ppid=91136 marker=yes desc_of_umu=yes comm=ping cmd=ping -n 10 127.0.0.1
+       8.12 - pid=91462 comm=cmd
+       8.12 - pid=91516 comm=ping
+      17.27 - pid=91024 comm=umu-run
+      17.27 - pid=91050 comm=pressure-vessel
+      17.27 - pid=91136 comm=pv-adverb
+      17.27 - pid=91160 comm=python3
+      17.27 - pid=91162 comm=wine
+      17.27 - pid=91164 comm=wineserver
+      17.27 - pid=91168 comm=services.exe
+      17.27 - pid=91171 comm=winedevice.exe
+      17.27 - pid=91181 comm=plugplay.exe
+      17.27 - pid=91197 comm=svchost.exe
+      17.27 - pid=91204 comm=winedevice.exe
+      17.27 - pid=91311 comm=explorer.exe
+      17.27 - pid=91327 comm=rpcss.exe
+      17.27 - pid=91337 comm=tabtip.exe
+      17.27 - pid=91339 comm=xalia.exe
+      17.27 - pid=91494 comm=conhost.exe
+      17.27 - pid=91699 comm=cmd
+      17.27 - pid=91701 comm=ping
+      17.27 monitor end (root_alive=False, left=[])
+[20:38:16.676] delayed: marker processes at end:
+[20:38:16.700] wmic: umu-run pid=92275 marker=7ad953865ab51142c0e29519d07d2d30 cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/wmic argv=cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\wmic\setup.bat
+[20:38:20.134] wmic: umu-run exited rc=0 at +3.43s; done-file present: no
+[20:38:20.135] wmic: marker processes right after umu-run exit:
+[20:38:20.161] wmic: wineserver -w rc=0 took 0.00s, returned at +3.46s; done-file present: no
+[20:38:20.267] wmic: monitor (t = seconds since launch):
+       0.00 + pid=92275 ppid=91010 marker=yes desc_of_umu=no comm=umu-run cmd=/usr/bin/python3 /usr/bin/umu-run cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1
+       0.51 + pid=92301 ppid=92275 marker=yes desc_of_umu=yes comm=pressure-vessel cmd=/home/jperez/.local/share/umu/steamrt4/pressure-vessel/bin/pressure-vessel-wrap --env-if-host=PRESSURE_VESSEL_APP_LD_LIBRARY_PATH=/opt/rocm/
+       1.01 + pid=92356 ppid=92301 marker=yes desc_of_umu=yes comm=pv-adverb cmd=/usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --
+       1.01 + pid=92357 ppid=92356 marker=yes desc_of_umu=yes comm=ldconfig cmd=/sbin/ldconfig -f /var/pressure-vessel/ldso/ld.so.conf -C /var/pressure-vessel/ldso/new-ld.so.cache -X
+       1.52 + pid=92380 ppid=92356 marker=yes desc_of_umu=yes comm=python3 cmd=python3 /home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/proton waitforexitandrun cmd /c Z:\tmp\claude-1000\-home-jper
+       1.52 + pid=92400 ppid=92380 marker=yes desc_of_umu=yes comm=wine cmd=/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib//wine/x86_64-unix/wine c:\windows\system32\steam.exe cmd /c
+       1.52 + pid=92402 ppid=92356 marker=yes desc_of_umu=yes comm=wineserver cmd=/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
+       1.52 + pid=92406 ppid=92356 marker=yes desc_of_umu=yes comm=wineboot.exe cmd=C:\windows\system32\wineboot.exe --init
+       1.52 + pid=92408 ppid=92356 marker=yes desc_of_umu=yes comm=services.exe cmd=C:\windows\system32\services.exe
+       1.52 + pid=92411 ppid=92356 marker=yes desc_of_umu=yes comm=winedevice.exe cmd=C:\windows\system32\winedevice.exe
+       1.52 + pid=92421 ppid=92356 marker=yes desc_of_umu=yes comm=plugplay.exe cmd=C:\windows\system32\plugplay.exe
+       1.52 - pid=92357 comm=ldconfig
+       2.03 + pid=92447 ppid=92356 marker=yes desc_of_umu=yes comm=svchost.exe cmd=C:\windows\system32\svchost.exe -k LocalServiceNetworkRestricted
+       2.03 + pid=92454 ppid=92356 marker=yes desc_of_umu=yes comm=winedevice.exe cmd=C:\windows\system32\winedevice.exe
+       3.04 + pid=92494 ppid=92356 marker=yes desc_of_umu=yes comm=explorer.exe cmd=C:\windows\system32\explorer.exe /desktop
+       3.04 + pid=92510 ppid=92356 marker=yes desc_of_umu=yes comm=rpcss.exe cmd=C:\windows\system32\rpcss.exe
+       3.04 + pid=92520 ppid=92356 marker=yes desc_of_umu=yes comm=tabtip.exe cmd=C:\windows\system32\tabtip.exe
+       3.04 - pid=92406 comm=wineboot.exe
+       3.55 - pid=92275 comm=umu-run
+       3.55 - pid=92301 comm=pressure-vessel
+       3.55 - pid=92356 comm=pv-adverb
+       3.55 - pid=92380 comm=python3
+       3.55 - pid=92400 comm=wine
+       3.55 - pid=92402 comm=wineserver
+       3.55 - pid=92408 comm=services.exe
+       3.55 - pid=92411 comm=winedevice.exe
+       3.55 - pid=92421 comm=plugplay.exe
+       3.55 - pid=92447 comm=svchost.exe
+       3.55 - pid=92454 comm=winedevice.exe
+       3.55 - pid=92494 comm=explorer.exe
+       3.55 - pid=92510 comm=rpcss.exe
+       3.55 - pid=92520 comm=tabtip.exe
+       3.55 monitor end (root_alive=False, left=[])
+[20:38:20.269] wmic: marker processes at end:
+    wmic.out: Error: Command not supported

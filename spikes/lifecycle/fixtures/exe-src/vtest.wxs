@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M1 spike: minimal per-machine MSI installing one file into C:\Program Files\VortexSpike -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="VortexSpike" Language="1033" Version="1.0.0" Manufacturer="VortexSpike"
+           UpgradeCode="6d1c8e0a-3f3b-4c55-9a7e-2a9b6c1f0e11">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+    <Media Id="1" Cabinet="vtest.cab" EmbedCab="yes" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="VortexSpike">
+          <Component Id="Payload" Guid="1b7f2f8e-6a2d-4c1e-8f4b-3d2a1c0b9e88">
+            <File Id="PayloadTxt" Source="payload.txt" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="Main" Level="1"><ComponentRef Id="Payload" /></Feature>
+  </Product>
+</Wix>

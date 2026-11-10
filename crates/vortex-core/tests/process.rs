@@ -31,7 +31,7 @@ pidf="$WINEPREFIX/fake-wineserver.pid"
 alive() {
   [ -s "$pidf" ] || return 1
   st=$(cat "/proc/$(cat "$pidf")/stat" 2>/dev/null) || return 1
-  [ "${st##*) }" != "${st##*) Z}" ] && return 1  # zombie: dead, just unreaped
+  case "${st##*) }" in Z*) return 1 ;; esac  # zombie: dead, just unreaped
   return 0
 }
 case "$1" in

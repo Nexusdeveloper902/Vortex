@@ -1,0 +1,2 @@
+err:module:import_dll Library MSVCP140.dll (which is needed by L"C:\\Games\\Foo\\foo.exe") not found
+err:module:LdrInitializeThunk "MSVCP140.dll" failed to initialize, aborting

@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/site-packages/umu/umu_run.py", line 806, in resolve_runtime
+    raise FileNotFoundError(err)
+FileNotFoundError: PROTONPATH '/tmp/nope' is not valid, toolmanifest.vdf not found

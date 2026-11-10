@@ -337,7 +337,9 @@ pub fn open(state: &Rc<AppState>, game_id: i64) {
             match res {
                 Ok(()) => {
                     state.toast("Saved");
-                    state.nav.pop();
+                    // The game page below was built from the old values: rebuild it.
+                    state.nav.pop_to_tag("library");
+                    crate::ui::game_page::open(&state, game_id);
                 }
                 Err(e) => state.toast(&e.to_string()),
             }

@@ -1,8 +1,8 @@
 //! Installer source analysis and candidate ranking. Pure filesystem reads; nothing is executed.
 //! Symlinks are never followed: they are skipped during the walk, so no candidate can escape the root.
 
-// TODO(M2): switch to vortex_core::Error / HostPath
-use std::fmt;
+use crate::error::{Error, Result};
+use crate::paths::HostPath;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -19,35 +19,6 @@ const REDIST_DIRS: &[&str] = &[
     "physx",
 ];
 
-// TODO(M2): switch to vortex_core::Error
-#[derive(Debug)]
-pub enum SourceError {
-    /// Path contains `..` or is not absolute-resolvable.
-    InvalidPath(PathBuf),
-    /// Neither a regular file nor a directory.
-    NotFileOrDir(PathBuf),
-    /// A file that is not `.exe` or `.msi`.
-    Unsupported(PathBuf),
-    Io(PathBuf, std::io::Error),
-}
-
-impl fmt::Display for SourceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidPath(p) => write!(f, "invalid path: {}", p.display()),
-            Self::NotFileOrDir(p) => write!(f, "not a file or directory: {}", p.display()),
-            Self::Unsupported(p) => write!(
-                f,
-                "unsupported installer type (expected .exe or .msi): {}",
-                p.display()
-            ),
-            Self::Io(p, e) => write!(f, "{}: {e}", p.display()),
-        }
-    }
-}
-
-impl std::error::Error for SourceError {}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
     File,
@@ -56,7 +27,7 @@ pub enum SourceKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
-    pub path: PathBuf,
+    pub path: HostPath,
     pub score: i32,
     pub reasons: Vec<String>,
 }
@@ -80,21 +51,27 @@ fn ext(name: &str) -> &str {
     name.rsplit_once('.').map_or("", |(_, e)| e)
 }
 
-pub fn analyze(path: &Path) -> Result<SourceAnalysis, SourceError> {
+pub fn analyze(path: &Path) -> Result<SourceAnalysis> {
     if path.components().any(|c| c == Component::ParentDir) {
-        return Err(SourceError::InvalidPath(path.to_owned()));
+        return Err(Error::InvalidPath(format!(
+            "{} contains '..'",
+            path.display()
+        )));
     }
     // The user's explicit choice may itself be a symlink; resolve it once, then never follow again.
-    let root = fs::canonicalize(path).map_err(|e| SourceError::Io(path.to_owned(), e))?;
-    let meta = fs::metadata(&root).map_err(|e| SourceError::Io(root.clone(), e))?;
+    let root = fs::canonicalize(path).map_err(Error::io(path))?;
+    let meta = fs::metadata(&root).map_err(Error::io(&root))?;
     if meta.is_file() {
         if !matches!(ext(&lower(&root)), "exe" | "msi") {
-            return Err(SourceError::Unsupported(root));
+            return Err(Error::Validation(format!(
+                "unsupported installer type (expected .exe or .msi): {}",
+                root.display()
+            )));
         }
         return Ok(SourceAnalysis {
             kind: SourceKind::File,
             candidates: vec![Candidate {
-                path: root,
+                path: HostPath::new(&root)?,
                 score: 100,
                 reasons: vec!["selected file".into()],
             }],
@@ -102,7 +79,10 @@ pub fn analyze(path: &Path) -> Result<SourceAnalysis, SourceError> {
         });
     }
     if !meta.is_dir() {
-        return Err(SourceError::NotFileOrDir(root));
+        return Err(Error::InvalidPath(format!(
+            "{} is not a file or directory",
+            root.display()
+        )));
     }
 
     // (path relative to root, depth)
@@ -168,13 +148,13 @@ pub fn analyze(path: &Path) -> Result<SourceAnalysis, SourceError> {
             if name.starts_with("dxsetup") || name.starts_with("vc_redist") {
                 add(-50, "prerequisite installer");
             }
-            Candidate {
-                path: root.join(f),
+            Ok(Candidate {
+                path: HostPath::new(root.join(f))?,
                 score,
                 reasons,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
     candidates.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
     let ambiguous = match candidates.as_slice() {
         [] => true,
@@ -189,10 +169,10 @@ pub fn analyze(path: &Path) -> Result<SourceAnalysis, SourceError> {
 }
 
 /// Collects regular files (relative paths) to `MAX_DEPTH`; symlinks are skipped.
-fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> Result<(), SourceError> {
-    let rd = fs::read_dir(dir).map_err(|e| SourceError::Io(dir.to_owned(), e))?;
+fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> Result<()> {
+    let rd = fs::read_dir(dir).map_err(Error::io(dir))?;
     for entry in rd {
-        let entry = entry.map_err(|e| SourceError::Io(dir.to_owned(), e))?;
+        let entry = entry.map_err(Error::io(dir))?;
         let Ok(ft) = entry.file_type() else { continue };
         let p = entry.path();
         if ft.is_file() {
@@ -249,6 +229,7 @@ mod tests {
     fn top(a: &SourceAnalysis) -> String {
         a.candidates[0]
             .path
+            .as_path()
             .file_name()
             .unwrap()
             .to_string_lossy()
@@ -266,7 +247,7 @@ mod tests {
         }
         assert!(matches!(
             analyze(&d.path().join("notes.txt")),
-            Err(SourceError::Unsupported(_))
+            Err(Error::Validation(_))
         ));
     }
 
@@ -275,7 +256,7 @@ mod tests {
         let d = tree(&["g.zip"]);
         assert!(matches!(
             analyze(&d.path().join("g.zip")),
-            Err(SourceError::Unsupported(_))
+            Err(Error::Validation(_))
         ));
     }
 
@@ -374,7 +355,11 @@ mod tests {
     fn depth_limited_and_uninstaller_penalized() {
         let d = tree(&["a/b/c/deep.exe", "unins000.exe", "game.exe"]);
         let a = analyze(d.path()).unwrap();
-        assert!(a.candidates.iter().all(|c| !c.path.ends_with("deep.exe")));
+        assert!(
+            a.candidates
+                .iter()
+                .all(|c| !c.path.as_path().ends_with("deep.exe"))
+        );
         assert_eq!(top(&a), "game.exe");
     }
 
@@ -382,7 +367,7 @@ mod tests {
     fn parent_dir_rejected() {
         let d = tree(&["setup.exe"]);
         let p = d.path().join("sub/../setup.exe");
-        assert!(matches!(analyze(&p), Err(SourceError::InvalidPath(_))));
+        assert!(matches!(analyze(&p), Err(Error::InvalidPath(_))));
     }
 
     #[test]
@@ -404,6 +389,7 @@ mod tests {
         assert!(
             a.candidates[0]
                 .path
+                .as_path()
                 .starts_with(fs::canonicalize(d.path()).unwrap())
         );
     }

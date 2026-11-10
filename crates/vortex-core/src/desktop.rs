@@ -4,7 +4,8 @@
 //! `<vortex> --launch <id>`. The applications dir is a parameter, so tests write to a temp dir and
 //! never touch the real `~/.local/share/applications`.
 
-use std::fmt;
+use crate::error::{Error, Result};
+use crate::paths::Paths;
 use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -12,72 +13,34 @@ use std::path::{Path, PathBuf};
 
 const APP_ID: &str = "io.github.nexusdeveloper902.Vortex";
 
-// TODO(M2): replace with vortex_core::Error (Validation / Io) and vortex_core::Result once error.rs lands.
-#[derive(Debug)]
-pub enum Error {
-    Invalid {
-        field: &'static str,
-        reason: &'static str,
-    },
-    Io {
-        path: PathBuf,
-        source: io::Error,
-    },
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Invalid { field, reason } => write!(f, "invalid {field}: {reason}"),
-            Error::Io { path, source } => write!(f, "{}: {source}", path.display()),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Io { source, .. } => Some(source),
-            Error::Invalid { .. } => None,
-        }
-    }
-}
-
 /// Writes (or replaces) the entry for a game and returns its path. Written to a temp file in the
 /// same directory, mode 0644, fsynced, then renamed over the target.
-pub fn write_entry(
-    applications_dir: &Path,
-    vortex: &Path,
-    game_id: &str,
-    name: &str,
-) -> Result<PathBuf> {
+pub fn write_entry(paths: &Paths, vortex: &Path, game_id: &str, name: &str) -> Result<PathBuf> {
     check_game_id(game_id)?;
-    let program = vortex.to_str().ok_or(Error::Invalid {
-        field: "vortex path",
-        reason: "not UTF-8",
-    })?;
+    let program = vortex
+        .to_str()
+        .ok_or_else(|| invalid("vortex path", "not UTF-8"))?;
     let exec = exec_value(program, &["--launch", game_id])?;
     let name = name_value(name)?;
     let contents = format!(
         "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nExec={exec}\nIcon={APP_ID}\n\
          Categories=Game;\nTerminal=false\nX-Vortex-Game-Id={game_id}\n"
     );
+    let applications_dir = paths.applications_dir();
     let path = entry_path(applications_dir, game_id);
-    fs::create_dir_all(applications_dir).map_err(|e| io_err(applications_dir, e))?;
+    fs::create_dir_all(applications_dir).map_err(Error::io(applications_dir))?;
     write_atomic(&path, contents.as_bytes())?;
     Ok(path)
 }
 
 /// Removes the entry for a game. Removing a missing entry is not an error.
-pub fn remove_entry(applications_dir: &Path, game_id: &str) -> Result<()> {
+pub fn remove_entry(paths: &Paths, game_id: &str) -> Result<()> {
     check_game_id(game_id)?;
-    let path = entry_path(applications_dir, game_id);
+    let path = entry_path(paths.applications_dir(), game_id);
     match fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io_err(&path, e)),
+        Err(e) => Err(Error::io(&path)(e)),
     }
 }
 
@@ -94,28 +57,22 @@ fn check_game_id(id: &str) -> Result<()> {
     if ok {
         Ok(())
     } else {
-        Err(Error::Invalid {
-            field: "game id",
-            reason: "must be non-empty ASCII letters, digits, '-' or '_'",
-        })
+        Err(invalid(
+            "game id",
+            "must be non-empty ASCII letters, digits, '-' or '_'",
+        ))
     }
 }
 
 fn name_value(name: &str) -> Result<String> {
     if name.trim().is_empty() {
-        return Err(Error::Invalid {
-            field: "game name",
-            reason: "empty",
-        });
+        return Err(invalid("game name", "empty"));
     }
     if name
         .chars()
         .any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'))
     {
-        return Err(Error::Invalid {
-            field: "game name",
-            reason: "contains a control character",
-        });
+        return Err(invalid("game name", "contains a control character"));
     }
     Ok(escape_string(name))
 }
@@ -127,10 +84,10 @@ fn exec_value(program: &str, args: &[&str]) -> Result<String> {
     let mut words = Vec::with_capacity(args.len() + 1);
     for arg in std::iter::once(program).chain(args.iter().copied()) {
         if arg.is_empty() || arg.chars().any(char::is_control) {
-            return Err(Error::Invalid {
-                field: "exec argument",
-                reason: "empty or contains a control character",
-            });
+            return Err(invalid(
+                "exec argument",
+                "empty or contains a control character",
+            ));
         }
         words.push(quote_arg(&arg.replace('%', "%%")));
     }
@@ -173,10 +130,7 @@ fn escape_string(s: &str) -> String {
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let (Some(dir), Some(file_name)) = (path.parent(), path.file_name()) else {
-        return Err(Error::Invalid {
-            field: "entry path",
-            reason: "has no parent directory",
-        });
+        return Err(invalid("entry path", "has no parent directory"));
     };
     let tmp = path.with_file_name(format!(
         ".{}.{}.tmp",
@@ -200,14 +154,11 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         .inspect_err(|_| {
             let _ = fs::remove_file(&tmp);
         })
-        .map_err(|e| io_err(path, e))
+        .map_err(Error::io(path))
 }
 
-fn io_err(path: &Path, source: io::Error) -> Error {
-    Error::Io {
-        path: path.to_owned(),
-        source,
-    }
+fn invalid(field: &str, reason: &str) -> Error {
+    Error::Validation(format!("invalid {field}: {reason}"))
 }
 
 #[cfg(test)]
@@ -234,6 +185,10 @@ mod tests {
         }
     }
 
+    fn paths(tmp: &TempDir) -> Paths {
+        Paths::under(&tmp.0)
+    }
+
     const TRICKY_PROGRAM: &str = "/opt/My Apps/vortex \"beta\" $HOME `x` \\ 100%";
     const TRICKY_NAME: &str = "Tom \"Dick\" 100% \\ café\tline\nnext";
 
@@ -241,7 +196,7 @@ mod tests {
     fn exact_contents_escape_exec_and_name() {
         let tmp = TempDir::new("contents");
         let dir = tmp.0.join("applications");
-        let path = write_entry(&dir, Path::new(TRICKY_PROGRAM), "7", TRICKY_NAME).unwrap();
+        let path = write_entry(&paths(&tmp), Path::new(TRICKY_PROGRAM), "7", TRICKY_NAME).unwrap();
         assert_eq!(
             path,
             dir.join("io.github.nexusdeveloper902.Vortex.game-7.desktop")
@@ -264,8 +219,15 @@ mod tests {
     #[test]
     fn written_entries_pass_desktop_file_validate() {
         let tmp = TempDir::new("validate");
-        let plain = write_entry(&tmp.0, Path::new("/usr/bin/vortex"), "1", "Plain Game").unwrap();
-        let tricky = write_entry(&tmp.0, Path::new(TRICKY_PROGRAM), "2", TRICKY_NAME).unwrap();
+        let plain = write_entry(
+            &paths(&tmp),
+            Path::new("/usr/bin/vortex"),
+            "1",
+            "Plain Game",
+        )
+        .unwrap();
+        let tricky =
+            write_entry(&paths(&tmp), Path::new(TRICKY_PROGRAM), "2", TRICKY_NAME).unwrap();
         for path in [plain, tricky] {
             match Command::new("desktop-file-validate").arg(&path).output() {
                 Ok(out) => assert!(
@@ -288,8 +250,8 @@ mod tests {
     fn overwrite_is_atomic_mode_0644_and_leaves_no_temp_files() {
         let tmp = TempDir::new("atomic");
         let dir = tmp.0.join("applications");
-        write_entry(&dir, Path::new("/usr/bin/vortex"), "3", "Old").unwrap();
-        let path = write_entry(&dir, Path::new("/usr/bin/vortex"), "3", "New").unwrap();
+        write_entry(&paths(&tmp), Path::new("/usr/bin/vortex"), "3", "Old").unwrap();
+        let path = write_entry(&paths(&tmp), Path::new("/usr/bin/vortex"), "3", "New").unwrap();
         assert!(fs::read_to_string(&path).unwrap().contains("Name=New\n"));
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o644);
@@ -303,11 +265,11 @@ mod tests {
     #[test]
     fn remove_is_idempotent() {
         let tmp = TempDir::new("remove");
-        let path = write_entry(&tmp.0, Path::new("/usr/bin/vortex"), "4", "Gone").unwrap();
-        remove_entry(&tmp.0, "4").unwrap();
+        let path = write_entry(&paths(&tmp), Path::new("/usr/bin/vortex"), "4", "Gone").unwrap();
+        remove_entry(&paths(&tmp), "4").unwrap();
         assert!(!path.exists());
-        remove_entry(&tmp.0, "4").unwrap();
-        remove_entry(&tmp.0.join("never-created"), "4").unwrap();
+        remove_entry(&paths(&tmp), "4").unwrap();
+        remove_entry(&Paths::under(tmp.0.join("never-created")), "4").unwrap();
     }
 
     #[test]
@@ -315,14 +277,22 @@ mod tests {
         let tmp = TempDir::new("reject");
         for id in ["", "../evil", "a/b", "1 2", "x\n"] {
             assert!(
-                write_entry(&tmp.0, Path::new("/usr/bin/vortex"), id, "N").is_err(),
+                write_entry(&paths(&tmp), Path::new("/usr/bin/vortex"), id, "N").is_err(),
                 "{id:?}"
             );
-            assert!(remove_entry(&tmp.0, id).is_err(), "{id:?}");
+            assert!(remove_entry(&paths(&tmp), id).is_err(), "{id:?}");
         }
-        assert!(write_entry(&tmp.0, Path::new("/usr/bin/vortex"), "5", "  ").is_err());
-        assert!(write_entry(&tmp.0, Path::new("/usr/bin/vo\nrtex"), "5", "N").is_err());
-        assert!(write_entry(&tmp.0, Path::new("/usr/bin/vortex"), "5", "bad\u{1}name").is_err());
+        assert!(write_entry(&paths(&tmp), Path::new("/usr/bin/vortex"), "5", "  ").is_err());
+        assert!(write_entry(&paths(&tmp), Path::new("/usr/bin/vo\nrtex"), "5", "N").is_err());
+        assert!(
+            write_entry(
+                &paths(&tmp),
+                Path::new("/usr/bin/vortex"),
+                "5",
+                "bad\u{1}name"
+            )
+            .is_err()
+        );
         assert_eq!(fs::read_dir(&tmp.0).unwrap().count(), 0);
     }
 }

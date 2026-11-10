@@ -1,58 +1,38 @@
 //! Proton runtime discovery and validation.
-//!
-//! TODO(M2): switch to `vortex_core::Error` / `HostPath` once M2 merges.
 
+use crate::error::{Error, Result};
+use crate::paths::HostPath;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, thiserror::Error)]
-pub enum RuntimeError {
-    #[error("invalid runtime {}: {reason}", path.display())]
-    Invalid { path: PathBuf, reason: String },
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("network error: {0}")]
-    Net(String),
-    #[error("checksum mismatch: expected {expected}, got {actual}")]
-    Checksum { expected: String, actual: String },
-    #[error("bad archive: {0}")]
-    Archive(String),
-    #[error("no suitable GE-Proton asset in release")]
-    NoAsset,
-    #[error("{} is already installed", .0.display())]
-    AlreadyInstalled(PathBuf),
-    #[error("cancelled")]
-    Cancelled,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Runtime {
     /// Canonical absolute Proton dir (PROTONPATH).
-    pub path: PathBuf,
+    pub path: HostPath,
     pub label: String,
     pub version: Option<String>,
 }
 
 impl Runtime {
     /// `files/bin/wineserver` (or older `dist/bin/wineserver`), if present.
-    pub fn wineserver(&self) -> Option<PathBuf> {
+    pub fn wineserver(&self) -> Option<HostPath> {
         ["files", "dist"]
             .iter()
-            .map(|d| self.path.join(d).join("bin/wineserver"))
-            .find(|p| p.is_file())
+            .filter_map(|d| self.path.join(Path::new(d).join("bin/wineserver")).ok())
+            .find(|p| p.as_path().is_file())
     }
 }
 
-fn invalid(path: &Path, reason: &str) -> RuntimeError {
-    RuntimeError::Invalid {
+fn invalid(path: &Path, reason: &str) -> Error {
+    Error::RuntimeInvalid {
         path: path.to_path_buf(),
         reason: reason.into(),
     }
 }
 
 /// Valid iff an executable `proton` and a `toolmanifest.vdf` exist.
-pub fn validate(dir: &Path) -> Result<Runtime, RuntimeError> {
+pub fn validate(dir: &Path) -> Result<Runtime> {
     let path = fs::canonicalize(dir).map_err(|e| invalid(dir, &e.to_string()))?;
     let proton = path.join("proton");
     let exec =
@@ -77,7 +57,7 @@ pub fn validate(dir: &Path) -> Result<Runtime, RuntimeError> {
         (!v.is_empty()).then(|| v.to_string())
     });
     Ok(Runtime {
-        path,
+        path: HostPath::new(&path)?,
         label,
         version,
     })
@@ -185,11 +165,17 @@ mod tests {
         assert_eq!(names, ["GE 9-1", "Proton 8"]); // sorted; symlink dup dropped
         let ge = &found[0];
         assert_eq!(ge.version.as_deref(), Some("GE-Proton9-1"));
-        assert!(ge.wineserver().unwrap().ends_with("files/bin/wineserver"));
+        assert!(
+            ge.wineserver()
+                .unwrap()
+                .as_path()
+                .ends_with("files/bin/wineserver")
+        );
         assert!(
             found[1]
                 .wineserver()
                 .unwrap()
+                .as_path()
                 .ends_with("dist/bin/wineserver")
         );
         assert!(validate(&nomanifest).is_err());
@@ -219,7 +205,7 @@ mod tests {
         let found = discover(&home, &home.join(".local/share/vortex/runtimes"));
         assert!(!found.is_empty(), "no Proton found on this machine");
         for r in &found {
-            println!("{} {:?} {}", r.label, r.version, r.path.display());
+            println!("{} {:?} {}", r.label, r.version, r.path.as_path().display());
         }
     }
 }

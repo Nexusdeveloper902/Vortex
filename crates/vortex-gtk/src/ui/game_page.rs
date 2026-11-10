@@ -13,7 +13,7 @@ use std::rc::Rc;
 use vortex_core::db::{Game, GameStatus};
 use vortex_core::launch;
 use vortex_core::paths::HostPath;
-use vortex_core::process::{RunEvent, RunHandle};
+use vortex_core::process::{Exit, Outcome, RunEvent, RunHandle};
 use vortex_core::winetricks;
 
 /// `launch_args` is a JSON array of strings; shown space-joined.
@@ -292,6 +292,7 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
                 }
                 None => return,
             };
+            let run_id = h.run_id();
             *running.borrow_mut() = Some(h);
             set_running(true);
             while let Ok(ev) = rx.recv().await {
@@ -306,7 +307,11 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
                         mark.set_visible(false);
                         set_running(false);
                         sub.set_label(&label);
-                        state.toast(&run_view::outcome_label(&o));
+                        if !o.stopped && !o.user_forced && o.exit != Some(Exit::Low8(0)) {
+                            launch_failed(&state, id, run_id, &o);
+                        } else {
+                            state.toast(&run_view::outcome_label(&o));
+                        }
                     }
                     _ => {}
                 }
@@ -314,6 +319,40 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
         });
     });
     hero
+}
+
+/// A launch that ended badly: what diagnose found (stored by core before `Finished`), with a way
+/// to the logs.
+fn launch_failed(state: &Rc<AppState>, game_id: i64, run_id: i64, o: &Outcome) {
+    let findings = state
+        .db()
+        .get_run(run_id)
+        .ok()
+        .and_then(|r| r.findings)
+        .map(|j| vortex_core::diagnose::from_json(&j))
+        .unwrap_or_default();
+    let body = failure_text(&run_view::outcome_label(o), &findings);
+    let d = adw::AlertDialog::new(Some("The game did not run correctly"), Some(&body));
+    d.add_response("close", "Close");
+    d.add_response("logs", "Show logs");
+    d.set_default_response(Some("logs"));
+    d.set_close_response("close");
+    let s = state.clone();
+    d.connect_response(None, move |_, r| {
+        if r == "logs" {
+            manage::logs_page(&s, game_id);
+        }
+    });
+    d.present(Some(&state.window));
+}
+
+pub fn failure_text(outcome: &str, findings: &[vortex_core::diagnose::Finding]) -> String {
+    let mut t = outcome.to_string();
+    for f in findings {
+        t.push_str("\n\n");
+        t.push_str(&dialogs::finding_text(f));
+    }
+    t
 }
 
 /// Configure, Run EXE/MSI, Dependencies, Logs, Back up, Restore.
@@ -448,6 +487,22 @@ fn overflow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failure_text_lists_findings() {
+        use vortex_core::diagnose::{Class, Confidence, Finding};
+        let f = Finding {
+            class: Class::AppCrash,
+            confidence: Confidence::Confirmed,
+            evidence: vec!["wine: Unhandled page fault".into()],
+        };
+        let t = failure_text("Ended (exit code 5)", &[f]);
+        assert!(t.starts_with("Ended (exit code 5)\n\nThe program crashed. (confirmed)\n"));
+        assert_eq!(
+            failure_text("Ended (exit code 1)", &[]),
+            "Ended (exit code 1)"
+        );
+    }
 
     #[test]
     fn args_and_env() {

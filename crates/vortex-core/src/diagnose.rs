@@ -269,6 +269,81 @@ pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) ->
     out
 }
 
+/// Maps a run's exit (only the low 8 bits are known) to [`Exit`]; the installer reboot codes
+/// 3010 / 1641 are mapped back so `classify` accepts them.
+pub fn exit_of(e: Option<crate::process::Exit>) -> Exit {
+    use crate::process::Exit as P;
+    match e {
+        Some(x) if x.matches(3010) => Exit::Code(3010),
+        Some(x) if x.matches(1641) => Exit::Code(1641),
+        Some(P::Low8(c)) => Exit::Code(i32::from(c)),
+        Some(P::Signal(s)) => Exit::Signal(s),
+        None => Exit::Unknown,
+    }
+}
+
+/// The output lines of a run log: everything after the header's `--` separator.
+pub fn log_lines(log: &str) -> Vec<String> {
+    log.lines()
+        .skip_while(|l| *l != "--")
+        .skip(1)
+        .map(str::to_owned)
+        .collect()
+}
+
+const CLASSES: &[Class] = &[
+    Class::InstallerFailure,
+    Class::RuntimeInitFailure,
+    Class::MissingDependency,
+    Class::MissingExecutable,
+    Class::AppCrash,
+    Class::MissingInstallerData,
+    Class::WrongWorkingDirectory,
+    Class::GraphicsPrerequisite,
+    Class::Unknown,
+];
+
+/// The JSON stored in `runs.findings`: `[{"class", "confidence", "evidence"}]`.
+pub fn to_json(f: &[Finding]) -> String {
+    let v: Vec<_> = f
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "class": format!("{:?}", f.class),
+                "confidence": format!("{:?}", f.confidence),
+                "evidence": f.evidence,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(v).to_string()
+}
+
+/// Inverse of [`to_json`]; unreadable input or entries give no findings.
+pub fn from_json(s: &str) -> Vec<Finding> {
+    let v: Vec<serde_json::Value> = serde_json::from_str(s).unwrap_or_default();
+    v.iter()
+        .filter_map(|f| {
+            let class = *CLASSES
+                .iter()
+                .find(|c| format!("{c:?}") == f["class"].as_str().unwrap_or(""))?;
+            let confidence = match f["confidence"].as_str()? {
+                "Confirmed" => Confidence::Confirmed,
+                _ => Confidence::Likely,
+            };
+            let evidence = f["evidence"]
+                .as_array()?
+                .iter()
+                .filter_map(|e| e.as_str().map(str::to_owned))
+                .collect();
+            Some(Finding {
+                class,
+                confidence,
+                evidence,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,6 +665,36 @@ mod tests {
                 Preflight::default()
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn findings_json_roundtrip() {
+        let f = vec![
+            Finding {
+                class: Class::AppCrash,
+                confidence: Confidence::Confirmed,
+                evidence: vec!["wine: Unhandled page fault".into()],
+            },
+            Finding {
+                class: Class::Unknown,
+                confidence: Confidence::Likely,
+                evidence: vec![],
+            },
+        ];
+        assert_eq!(from_json(&to_json(&f)), f);
+        assert!(from_json("not json").is_empty());
+        assert_eq!(
+            log_lines("kind: launch\n--\nE|a\nO|b"),
+            vec!["E|a".to_string(), "O|b".to_string()]
+        );
+        assert_eq!(
+            exit_of(Some(crate::process::Exit::Low8(194))),
+            Exit::Code(3010)
+        );
+        assert_eq!(
+            exit_of(Some(crate::process::Exit::Low8(42))),
+            Exit::Code(42)
         );
     }
 }

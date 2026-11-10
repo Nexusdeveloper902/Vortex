@@ -463,6 +463,29 @@ fn source_removed_mid_install_is_missing_installer_data() {
 }
 
 #[test]
+fn source_file_removed_mid_install_is_named() {
+    let Some(t) = fake() else { return };
+    let src = t.source("lost file src", "sleep:2,exit:3");
+    let s = t.inst.begin(t.req("Lost File", &src, "setup.exe")).unwrap();
+    let evs = drive(&s.events, LIMIT, |ev| {
+        if let InstallEvent::Run {
+            event: RunEvent::Phase(Phase::Running),
+            kind: RunKind::Install,
+        } = ev
+        {
+            std::fs::remove_file(src.as_path().join("data1.bin")).unwrap();
+        }
+    });
+    assert_eq!(states(&evs).last(), Some(&InstallState::Failed));
+    let named = evs.iter().any(|e| {
+        matches!(e, InstallEvent::Finding(f) if f.class == Class::MissingInstallerData
+            && f.confidence == vortex_core::diagnose::Confidence::Confirmed
+            && f.evidence.iter().any(|l| l.contains("data1.bin")))
+    });
+    assert!(named, "{evs:?}");
+}
+
+#[test]
 fn cancel_mid_install_then_retry() {
     let Some(t) = fake() else { return };
     let src = t.source("cancel src", "sleep:30");

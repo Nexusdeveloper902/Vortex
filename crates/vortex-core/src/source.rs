@@ -180,6 +180,31 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> Result
     Ok(())
 }
 
+/// Relative path -> size of every regular file under `root` (same depth limit as `analyze`).
+pub fn listing(root: &Path) -> Result<std::collections::BTreeMap<PathBuf, u64>> {
+    let mut files = Vec::new();
+    walk(root, root, 0, &mut files)?;
+    Ok(files
+        .into_iter()
+        .filter_map(|f| {
+            let n = fs::metadata(root.join(&f)).ok()?.len();
+            Some((f, n))
+        })
+        .collect())
+}
+
+/// Files in `before` that are gone from `after` or have a different size.
+pub fn lost_files(
+    before: &std::collections::BTreeMap<PathBuf, u64>,
+    after: &std::collections::BTreeMap<PathBuf, u64>,
+) -> Vec<PathBuf> {
+    before
+        .iter()
+        .filter(|(p, n)| after.get(*p) != Some(*n))
+        .map(|(p, _)| p.clone())
+        .collect()
+}
+
 /// Top-level `autorun.inf` `open=` target, matched case-insensitively against walked files.
 fn autorun_target(root: &Path, files: &[PathBuf]) -> Option<PathBuf> {
     let inf = files
@@ -246,6 +271,22 @@ mod tests {
             analyze(&h(d.path().join("notes.txt"))),
             Err(Error::Validation(_))
         ));
+    }
+
+    #[test]
+    fn lost_files_reports_removed_and_resized() {
+        let t = tree(&["setup.exe", "a.bin", "b.bin", "c.bin"]);
+        std::fs::write(t.path().join("c.bin"), "x").unwrap();
+        let before = listing(t.path()).unwrap();
+        std::fs::remove_file(t.path().join("a.bin")).unwrap();
+        std::fs::write(t.path().join("b.bin"), "longer").unwrap();
+        std::fs::write(t.path().join("new.bin"), "y").unwrap();
+        let after = listing(t.path()).unwrap();
+        assert_eq!(
+            lost_files(&before, &after),
+            [PathBuf::from("a.bin"), PathBuf::from("b.bin")]
+        );
+        assert!(lost_files(&after, &after).is_empty());
     }
 
     #[test]

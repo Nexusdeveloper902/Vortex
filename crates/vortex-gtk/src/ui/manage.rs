@@ -114,9 +114,9 @@ pub fn dependencies(state: &Rc<AppState>, env_id: i64) {
     d.present(Some(&state.window));
     let (state, stack, d2) = (state.clone(), stack, d.clone());
     glib::spawn_future_local(async move {
-        let (rt2, p2) = (rt.clone(), prefix.clone());
+        let (rt2, p2, paths2) = (rt.clone(), prefix.clone(), state.paths.clone());
         let res = blocking(move || {
-            let verbs = winetricks::list_verbs(&Tools::default(), &rt2, &p2)?;
+            let verbs = winetricks::list_verbs(&Tools::default(), &rt2, &paths2)?;
             let inst = winetricks::installed(&p2)?;
             Ok::<_, vortex_core::error::Error>((verbs, inst))
         })

@@ -195,6 +195,13 @@ impl Paths {
     pub fn games_dir(&self) -> PathBuf {
         self.data.join("games")
     }
+    /// Persistent scratch prefix for read-only umu calls (e.g. `winetricks list-all`); never a game
+    /// prefix and never deleted. Created on first use.
+    pub fn scratch_prefix(&self) -> Result<PrefixDir> {
+        let dir = self.data.join("scratch/list-verbs");
+        create_private_dir(&dir)?;
+        PrefixDir::new(dir, &self.home, &[])
+    }
     /// The Vortex-managed prefix for an environment: `data/prefixes/<env_id>`.
     pub fn managed_prefix(&self, env: EnvId) -> Result<PrefixDir> {
         PrefixDir::new(self.prefixes_dir().join(env.to_string()), &self.home, &[])

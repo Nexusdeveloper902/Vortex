@@ -68,6 +68,14 @@ pub fn run() -> glib::ExitCode {
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
+    app.add_main_option(
+        "launch",
+        glib::Char::from(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::Int64,
+        "Start the game with this id",
+        Some("ID"),
+    );
     let slot: Slot = Rc::default();
     {
         let slot = slot.clone();
@@ -80,7 +88,8 @@ pub fn run() -> glib::ExitCode {
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
         a.activate();
-        match parse_launch(&args) {
+        let opt = cl.options_dict().lookup::<i64>("launch").ok().flatten();
+        match opt.map(Some).map_or_else(|| parse_launch(&args), Ok) {
             Ok(Some(id)) => {
                 if let Some(s) = slot.borrow().clone() {
                     game_page::open_and_play(&s, id);

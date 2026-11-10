@@ -813,6 +813,9 @@ impl Worker {
         } else {
             inv(Program::Exe(installer.clone()), Vec::new(), cwd)
         };
+        // ponytail: in-memory snapshot per attempt (retries included); installer output never
+        // reaches umu's pipes, so a vanished/resized file is the only hard evidence.
+        let before = crate::source::listing(source.as_path()).unwrap_or_default();
         let ran = self.run_one(spec(RunKind::Install, invocation), Some(&source_ok))?;
         let o = ran.outcome;
         if self.cancelled() || o.is_some_and(|o| o.stopped) {
@@ -823,7 +826,21 @@ impl Worker {
             source_exists: Some(!lost),
             ..Preflight::default()
         };
-        let findings = self.classify(ran.run_id, diagnose::RunKind::Install, o, pre);
+        let mut findings = self.classify(ran.run_id, diagnose::RunKind::Install, o, pre);
+        let exited_ok = o.is_some_and(|o| o.exit.is_some_and(|x| x.matches(0)));
+        if !lost && !exited_ok {
+            let after = crate::source::listing(source.as_path()).unwrap_or_default();
+            for p in crate::source::lost_files(&before, &after) {
+                findings.push(Finding {
+                    class: Class::MissingInstallerData,
+                    confidence: Confidence::Confirmed,
+                    evidence: vec![format!(
+                        "installer source file {} disappeared or changed size during the run",
+                        p.display()
+                    )],
+                });
+            }
+        }
         self.report(ran.run_id, &findings);
         if lost {
             return Ok(End::Failed(class_name(Class::MissingInstallerData)));

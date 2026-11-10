@@ -19,6 +19,19 @@ Vortex is not affiliated with Valve, Lutris or Bottles.
   lifecycle, the data schema and the security rules.
 - [`spec.md`](spec.md): the product specification.
 
+## Install
+
+Download from the [latest release](https://github.com/Nexusdeveloper902/Vortex/releases/latest)
+(`sha256sums.txt` and GitHub build provenance attestations are attached):
+
+- `vortex-X.Y.Z-x86_64-linux.tar.gz`: generic binary tarball (see `INSTALL.txt` inside).
+- `.deb`: Debian 13 (trixie) or newer, Ubuntu 25.04 or newer. Older releases ship GTK or libadwaita
+  too old (GTK 4.14 and libadwaita 1.6 are required).
+- `.rpm`: Fedora.
+- Arch Linux: build the `vortex-git` package from [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD).
+
+`umu-launcher` and `winetricks` are not pulled in by the `.deb`/`.rpm`; install them separately.
+
 ## Requirements
 
 Arch Linux packages:

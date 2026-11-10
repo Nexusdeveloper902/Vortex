@@ -62,11 +62,8 @@ const PATTERNS: &[(&str, Class, Confidence)] = &[
         Class::RuntimeInitFailure,
         Confidence::Confirmed,
     ),
-    (
-        "unable to use parent for game drive",
-        Class::RuntimeInitFailure,
-        Confidence::Confirmed,
-    ),
+    // "unable to use parent for game drive" is benign (Proton prints it outside a Steam library)
+    // and "executable not found:" needs the run outcome, so both are handled in `classify`.
     (
         "pressure-vessel",
         Class::RuntimeInitFailure,
@@ -75,11 +72,6 @@ const PATTERNS: &[(&str, Class, Confidence)] = &[
     (
         "failed to download",
         Class::RuntimeInitFailure,
-        Confidence::Likely,
-    ),
-    (
-        "executable not found:",
-        Class::MissingExecutable,
         Confidence::Likely,
     ),
     (
@@ -140,6 +132,12 @@ fn named_file(line: &str) -> Option<&str> {
         })
 }
 
+/// umu logs `Executable not found:` for every `C:\windows\system32\*.exe` launch, even successful
+/// ones, so that line is evidence only for a failed run outside system32. `low` is lowercased.
+fn is_system32_builtin(low: &str) -> bool {
+    low.replace('/', "\\").contains("\\windows\\system32\\")
+}
+
 fn push(out: &mut Vec<Finding>, class: Class, confidence: Confidence, line: &str) {
     if let Some(f) = out
         .iter_mut()
@@ -197,6 +195,9 @@ pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) ->
         );
     }
 
+    // Installers legitimately return 3010 / 1641 (reboot required); never treat those as failure.
+    let failed = matches!(exit, Exit::Code(c) if c != 0 && c != 3010 && c != 1641);
+
     for raw in lines {
         let line = strip_prefix(raw).trim();
         let low = line.to_lowercase();
@@ -212,6 +213,9 @@ pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) ->
             if low.contains(needle) {
                 push(&mut out, class, conf, line);
             }
+        }
+        if failed && low.contains("executable not found:") && !is_system32_builtin(&low) {
+            push(&mut out, Class::MissingExecutable, Confidence::Likely, line);
         }
         if NOT_FOUND.iter().any(|n| low.contains(n))
             && let Some(file) = named_file(line)
@@ -245,8 +249,6 @@ pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) ->
             &format!("terminated by signal {s}"),
         );
     }
-    // Installers legitimately return 3010 / 1641 (reboot required); never treat those as failure.
-    let failed = matches!(exit, Exit::Code(c) if c != 0 && c != 3010 && c != 1641);
     if out.is_empty() && failed {
         if kind == RunKind::Install {
             push(
@@ -386,14 +388,36 @@ mod tests {
     }
 
     #[test]
-    fn real_umu_game_drive_is_runtime_init() {
+    fn benign_proton_and_system32_noise_is_not_a_finding() {
+        // Successful run with both benign lines: no findings at all.
+        assert!(
+            run(
+                RunKind::Launch,
+                OK,
+                "real-umu-system32-builtin.log",
+                Preflight::default()
+            )
+            .is_empty()
+        );
+        // The same lines on a failed run are still not a runtime or executable finding.
+        let f = run(
+            RunKind::Launch,
+            BAD,
+            "real-umu-system32-builtin.log",
+            Preflight::default(),
+        );
+        assert!(has(&f, Class::RuntimeInitFailure).is_none());
+        assert!(has(&f, Class::MissingExecutable).is_none());
+        // Real failed run with the "unable to use parent" line and a non-system32 path:
+        // only the missing executable is reported, never a runtime failure.
         let f = run(
             RunKind::Launch,
             Exit::Code(5),
             "real-umu-missing-exe.log",
             Preflight::default(),
         );
-        assert!(has(&f, Class::RuntimeInitFailure).is_some());
+        assert!(has(&f, Class::RuntimeInitFailure).is_none());
+        assert!(has(&f, Class::MissingExecutable).is_some());
     }
 
     #[test]

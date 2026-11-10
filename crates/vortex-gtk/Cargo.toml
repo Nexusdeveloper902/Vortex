@@ -12,6 +12,8 @@ path = "src/main.rs"
 vortex-core = { path = "../vortex-core" }
 gtk4 = { version = "0.11.5", features = ["v4_14"] }
 libadwaita = { version = "0.9.2", features = ["v1_6"] }
+async-channel = "2.5.0" # core progress channels are consumed here
+serde_json = "1.0.154" # display of launch_args / env_vars JSON stored by core
 rustix = { version = "1.1.6", features = ["process"] }
 
 [lints]

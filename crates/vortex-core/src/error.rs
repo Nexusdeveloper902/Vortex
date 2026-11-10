@@ -1,0 +1,1 @@
+//! Error and Result types.

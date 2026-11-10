@@ -143,7 +143,8 @@ fn activate(app: &adw::Application, slot: &Slot) {
         .default_height(640)
         .content(&toasts)
         .build();
-    toasts.set_child(Some(&nav));
+    // `nav` must stay unparented here: it becomes the child of the split view's content page
+    // below, and a widget with a parent makes `NavigationPage::new` fail (empty content pane).
 
     let opened = Paths::from_xdg().and_then(|p| Db::open(&p.db_file()).map(|d| (p, d)));
     let (paths, db) = match opened {

@@ -1,4 +1,4 @@
-[20:42:31.782] sigterm: umu-run pid=113680 marker=f15cc21f7cc030b9cc1097f99751887c cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 argv=cmd /c ping -n 60 127.0.0.1
+[20:42:31.782] sigterm: umu-run pid=113680 marker=f15cc21f7cc030b9cc1097f99751887c cwd=/tmp/claude-1000/-home-user-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 argv=cmd /c ping -n 60 127.0.0.1
 [20:42:39.805] sigterm: marker procs before: 18
 [20:42:39.934] sigterm: umu-run alive=no at +0.11s; marker procs=2
     114047 1 pv-adverb /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --fd 13 --regenerate-l

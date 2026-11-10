@@ -1,21 +1,21 @@
-[20:42:53.050] msi: msiexec /i Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn (cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real, STEAM_COMPAT_INSTALL_PATH=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real)
-[20:42:53.052] msi: umu-run pid=118560 marker=81ebf913ed1a75ce391f9a8eb5d757c4 cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /i Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
+[20:42:53.050] msi: msiexec /i Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn (cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real, STEAM_COMPAT_INSTALL_PATH=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real)
+[20:42:53.052] msi: umu-run pid=118560 marker=81ebf913ed1a75ce391f9a8eb5d757c4 cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /i Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
 [20:42:57.127] msi: rc=0; installed file: VTEST-MSI-PAYLOAD
-[20:42:57.130] msi: msiexec /x Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
-[20:42:57.132] msi: umu-run pid=119156 marker=ba2ef01a9732f38df35115227da43cf5 cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /x Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
+[20:42:57.130] msi: msiexec /x Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
+[20:42:57.132] msi: umu-run pid=119156 marker=ba2ef01a9732f38df35115227da43cf5 cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /x Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi-real\vtest.msi /qn
 [20:43:02.740] msi: uninstall rc=0; file still present: no
-[20:43:02.742] msi: msiexec /i /home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn (cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real, STEAM_COMPAT_INSTALL_PATH=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real)
-[20:43:02.744] msi: umu-run pid=120265 marker=7275330533b8c9bc7b69ae94ff8340ee cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /i /home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
+[20:43:02.742] msi: msiexec /i /home/user/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn (cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real, STEAM_COMPAT_INSTALL_PATH=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real)
+[20:43:02.744] msi: umu-run pid=120265 marker=7275330533b8c9bc7b69ae94ff8340ee cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /i /home/user/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
 [20:43:06.827] msi: rc=0; installed file: VTEST-MSI-PAYLOAD
-[20:43:06.830] msi: msiexec /x /home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
-[20:43:06.833] msi: umu-run pid=120882 marker=cb2859f6587a57af0fd581303ea7914d cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /x /home/jperez/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
+[20:43:06.830] msi: msiexec /x /home/user/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
+[20:43:06.833] msi: umu-run pid=120882 marker=cb2859f6587a57af0fd581303ea7914d cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi-real argv=msiexec /x /home/user/.cache/vortex-m1-spike/home/vtest-msi-real/vtest.msi /qn
 [20:43:11.932] msi: uninstall rc=0; file still present: no
-[20:43:11.937] s7: msiexec /i Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi\fake.msi /qn (cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi)
-[20:43:11.939] s7: umu-run pid=121942 marker=11c13b04a1996bb9a3ac16b23926ce7b cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi argv=msiexec /i Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi\fake.msi /qn
+[20:43:11.937] s7: msiexec /i Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi\fake.msi /qn (cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi)
+[20:43:11.939] s7: umu-run pid=121942 marker=11c13b04a1996bb9a3ac16b23926ce7b cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi argv=msiexec /i Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi\fake.msi /qn
 [20:43:15.632] s7: rc=0
-[20:43:16.019] s7: msiexec /i Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi\missing.msi /qn (cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi)
-[20:43:16.022] s7: umu-run pid=122414 marker=19e786f0b18ee2a01bf3941232287ca3 cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi argv=msiexec /i Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-msi\missing.msi /qn
+[20:43:16.019] s7: msiexec /i Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi\missing.msi /qn (cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi)
+[20:43:16.022] s7: umu-run pid=122414 marker=19e786f0b18ee2a01bf3941232287ca3 cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi argv=msiexec /i Z:\home\user\.cache\vortex-m1-spike\home\vtest-msi\missing.msi /qn
 [20:43:19.592] s7: rc=0
-[20:43:20.116] s7: msiexec /i /home/jperez/.cache/vortex-m1-spike/home/vtest-msi/fake.msi /qn (cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi)
-[20:43:20.130] s7: umu-run pid=123214 marker=e23e068aaea2c808bb0b46edfb74606c cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-msi argv=msiexec /i /home/jperez/.cache/vortex-m1-spike/home/vtest-msi/fake.msi /qn
+[20:43:20.116] s7: msiexec /i /home/user/.cache/vortex-m1-spike/home/vtest-msi/fake.msi /qn (cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi)
+[20:43:20.130] s7: umu-run pid=123214 marker=e23e068aaea2c808bb0b46edfb74606c cwd=/home/user/.cache/vortex-m1-spike/home/vtest-msi argv=msiexec /i /home/user/.cache/vortex-m1-spike/home/vtest-msi/fake.msi /qn
 [20:43:24.854] s7: rc=0

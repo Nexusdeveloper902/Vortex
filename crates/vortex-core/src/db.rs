@@ -832,6 +832,109 @@ impl Db {
     }
 }
 
+// ---- M9 (install) ----
+
+/// The environment a new game goes into.
+#[derive(Debug, Clone, Copy)]
+pub enum NewEnv<'a> {
+    Existing(i64),
+    /// New managed environment; its prefix is `<prefixes_dir>/<env id>`.
+    Managed {
+        prefixes_dir: &'a Path,
+        runtime: &'a str,
+    },
+    /// New environment around a prefix Vortex did not create (`prefix_managed = 0`).
+    Unmanaged {
+        prefix: &'a str,
+        runtime: &'a str,
+    },
+}
+
+impl Db {
+    /// One transaction: the environment (unless existing), the game and, when given, its install
+    /// (`created`). `game.environment_id` and `install.game_id` are ignored.
+    /// Returns `(environment_id, game_id, install_id)`.
+    pub fn create_game(
+        &mut self,
+        env: NewEnv<'_>,
+        game: &NewGame,
+        install: Option<&NewInstall>,
+    ) -> Result<(i64, i64, Option<i64>)> {
+        let tx = self.conn.transaction()?;
+        let t = now();
+        let new_env = |prefix: &str, managed: bool, runtime: &str| {
+            tx.execute(
+                "INSERT INTO environments(prefix_path,prefix_managed,runtime_path,created_at) VALUES(?1,?2,?3,?4)",
+                params![prefix, managed, runtime, t],
+            )
+            .map(|_| tx.last_insert_rowid())
+        };
+        let env_id = match env {
+            NewEnv::Existing(id) => id,
+            NewEnv::Unmanaged { prefix, runtime } => new_env(prefix, false, runtime)?,
+            NewEnv::Managed {
+                prefixes_dir,
+                runtime,
+            } => {
+                // The path depends on the id: a placeholder no committed row ever has, fixed
+                // before commit.
+                let id = new_env("", true, runtime)?;
+                let prefix = prefixes_dir.join(id.to_string());
+                tx.execute(
+                    "UPDATE environments SET prefix_path=?2 WHERE id=?1",
+                    params![id, prefix.to_string_lossy()],
+                )?;
+                id
+            }
+        };
+        tx.execute(
+            "INSERT INTO games(name,environment_id,status,install_dir,install_dir_managed,exe_path,work_dir,launch_args,env_vars,created_at,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
+            params![game.name, env_id, game.status.as_str(), game.install_dir, game.install_dir_managed, game.exe_path, game.work_dir, game.launch_args, game.env_vars, t],
+        )?;
+        let game_id = tx.last_insert_rowid();
+        let install_id = match install {
+            Some(i) => {
+                tx.execute(
+                    "INSERT INTO installs(game_id,source_path,source_kind,installer_path,state,started_at,updated_at) VALUES(?1,?2,?3,?4,'created',?5,?5)",
+                    params![game_id, i.source_path, i.source_kind.as_str(), i.installer_path, t],
+                )?;
+                Some(tx.last_insert_rowid())
+            }
+            None => None,
+        };
+        tx.commit()?;
+        Ok((env_id, game_id, install_id))
+    }
+
+    /// One transaction: install `select_exe -> done` and its game `installed` with the exe.
+    /// The caller (install::confirm_exe) must have checked that the exe exists.
+    pub fn complete_install(
+        &mut self,
+        install_id: i64,
+        exe_path: &str,
+        work_dir: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let t = now();
+        let n = tx.execute(
+            "UPDATE installs SET state='done',failure=NULL,updated_at=?2 WHERE id=?1 AND state='select_exe'",
+            params![install_id, t],
+        )?;
+        if n == 0 {
+            return Err(Error::Validation(format!(
+                "install {install_id} is not waiting for an executable"
+            )));
+        }
+        tx.execute(
+            "UPDATE games SET status='installed',exe_path=?2,work_dir=?3,updated_at=?4 WHERE id=(SELECT game_id FROM installs WHERE id=?1)",
+            params![install_id, exe_path, work_dir, t],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

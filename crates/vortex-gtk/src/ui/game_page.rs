@@ -10,10 +10,10 @@ use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
-use vortex_core::db::{Game, GameStatus};
+use vortex_core::db::{Game, GameStatus, RunKind};
 use vortex_core::launch;
 use vortex_core::paths::HostPath;
-use vortex_core::process::{Exit, Outcome, RunEvent, RunHandle};
+use vortex_core::process::{Exit, Outcome, RunEvent, RunHandle, Runs};
 use vortex_core::winetricks;
 
 /// `launch_args` is a JSON array of strings; shown space-joined.
@@ -231,7 +231,7 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
     col.append(&mark);
     hero.append(&col);
 
-    let running: Rc<RefCell<Option<RunHandle>>> = Rc::new(RefCell::new(state.runs.active(env_id)));
+    let running: Rc<RefCell<Option<Playing>>> = Rc::new(RefCell::new(playing(&state.runs, env_id)));
     let set_running = {
         let (play, sub) = (play.clone(), sub.clone());
         move |on: bool| {
@@ -258,18 +258,63 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
     {
         let running = running.clone();
         mark.connect_clicked(move |_| {
-            if let Some(h) = running.borrow().as_ref() {
+            if let Some(Playing::Live(h)) = running.borrow().as_ref() {
                 h.mark_finished();
             }
         });
     }
+    // A page built while the game runs (rebuilt page, detached launch) has no event stream to
+    // follow: poll, and only treat this env's launch runs as "Running".
+    {
+        let (running, set_running, sub) = (running.clone(), set_running.clone(), sub.clone());
+        let label = status_label(g.status.as_str());
+        let (runs, play) = (state.runs.clone(), play.downgrade());
+        glib::timeout_add_seconds_local(2, move || {
+            let Some(play) = play.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let now = playing(&runs, env_id);
+            let id = |p: &Option<Playing>| p.as_ref().map(Playing::run_id);
+            if id(&now) != id(&running.borrow()) {
+                let on = now.is_some();
+                *running.borrow_mut() = now;
+                set_running(on);
+                if !on {
+                    play.set_sensitive(true);
+                    sub.set_label(label);
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
     let (state, id) = (state.clone(), g.id);
-    let installed_label = sub.label().to_string();
+    let installed_label = status_label(g.status.as_str()).to_string();
     play.connect_clicked(move |b| {
-        if let Some(h) = running.borrow().as_ref() {
-            h.stop();
-            b.set_sensitive(false);
-            return;
+        match running.borrow().clone() {
+            Some(Playing::Live(h)) => {
+                h.stop();
+                b.set_sensitive(false);
+                return;
+            }
+            Some(Playing::Detached(run_id)) => {
+                b.set_sensitive(false);
+                let (state, b) = (state.clone(), b.clone());
+                glib::spawn_future_local(async move {
+                    let runs = state.runs.clone();
+                    let r = crate::app::blocking(move || runs.stop_detached(run_id)).await;
+                    b.set_sensitive(true);
+                    match r {
+                        Some(Ok(left)) if !left.is_empty() => {
+                            state.toast("Some processes did not stop.")
+                        }
+                        Some(Ok(_)) => state.toast("Stopped."),
+                        Some(Err(e)) => state.toast(&e.to_string()),
+                        None => {}
+                    }
+                });
+                return;
+            }
+            None => {}
         }
         b.set_sensitive(false);
         let (state, running, sub, mark, set_running, label) = (
@@ -293,7 +338,7 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
                 None => return,
             };
             let run_id = h.run_id();
-            *running.borrow_mut() = Some(h);
+            *running.borrow_mut() = Some(Playing::Live(h));
             set_running(true);
             while let Ok(ev) = rx.recv().await {
                 match ev {
@@ -319,6 +364,35 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
         });
     });
     hero
+}
+
+/// The game's launch run in this environment, if one is running.
+#[derive(Clone)]
+enum Playing {
+    /// Supervised in this session.
+    Live(RunHandle),
+    /// Left by an earlier session (stopped with `Runs::stop_detached`).
+    Detached(i64),
+}
+
+impl Playing {
+    fn run_id(&self) -> i64 {
+        match self {
+            Playing::Live(h) => h.run_id(),
+            Playing::Detached(id) => *id,
+        }
+    }
+}
+
+fn playing(runs: &Runs, env_id: i64) -> Option<Playing> {
+    if let Some(h) = runs.active(env_id) {
+        return (h.kind() == RunKind::Launch).then_some(Playing::Live(h));
+    }
+    runs.detached()
+        .ok()?
+        .into_iter()
+        .find(|r| r.environment_id == env_id && r.kind == RunKind::Launch)
+        .map(|r| Playing::Detached(r.id))
 }
 
 /// A launch that ended badly: what diagnose found (stored by core before `Finished`), with a way

@@ -9,11 +9,13 @@ use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use vortex_core::db::{Db, InstallState};
+use vortex_core::db::{Db, InstallState, Run};
 use vortex_core::delete::DeletionPlan;
 use vortex_core::diagnose::{Class, Confidence, Finding};
 use vortex_core::error::{Error, Result};
+use vortex_core::install::Installs;
 use vortex_core::paths::Paths;
+use vortex_core::process::{Runs, program_name};
 use vortex_core::runtime::{self, Runtime};
 
 // ---- pure helpers ----
@@ -264,7 +266,19 @@ pub fn runtime_combo(state: &Rc<AppState>, preselect: Option<String>) -> (adw::C
     (combo, found)
 }
 
-/// Banner for installs whose processes survived a previous session: offers Stop or Wait.
+/// Stop sequence for a detached run of any kind; returns how many processes survived. Blocking
+/// (up to ~10 s): call on a worker thread. Install runs go through `Installs` so the install
+/// row follows.
+pub fn stop_detached(installs: &Installs, runs: &Runs, r: &Run) -> Result<usize> {
+    match r.install_id {
+        Some(i) => installs.stop_detached(i),
+        None => runs.stop_detached(r.id),
+    }
+    .map(|left| left.len())
+}
+
+/// Banner for runs (any kind) whose processes survived a previous session: offers Stop or Wait,
+/// and polls every one of them until it ends.
 pub fn detached_banner(state: &Rc<AppState>) -> adw::Banner {
     let banner = adw::Banner::builder()
         .button_label("Stop or wait...")
@@ -273,9 +287,9 @@ pub fn detached_banner(state: &Rc<AppState>) -> adw::Banner {
     let refresh = {
         let (state, banner) = (state.clone(), banner.clone());
         Rc::new(move || {
-            let n = state.installs.detached().map(|v| v.len()).unwrap_or(0);
+            let n = state.runs.detached().map(|v| v.len()).unwrap_or(0);
             banner.set_title(&format!(
-                "{n} installer run(s) from an earlier session are still running"
+                "{n} program(s) from an earlier session are still running"
             ));
             banner.set_revealed(n > 0);
         })
@@ -284,11 +298,11 @@ pub fn detached_banner(state: &Rc<AppState>) -> adw::Banner {
     {
         let (state, refresh) = (state.clone(), refresh.clone());
         banner.connect_button_clicked(move |_| {
-            let Ok(list) = state.installs.detached() else {
+            let Ok(list) = state.runs.detached() else {
                 return;
             };
             let d = adw::AlertDialog::new(
-                Some("Installer still running"),
+                Some("Still running"),
                 Some(
                     "Vortex can stop these processes, or keep waiting and check again until they end.",
                 ),
@@ -303,20 +317,19 @@ pub fn detached_banner(state: &Rc<AppState>) -> adw::Banner {
                 if id != "stop" {
                     return;
                 }
-                let (state, refresh) = (state.clone(), refresh.clone());
-                let ids: Vec<i64> = list.iter().map(|(i, _)| i.id).collect();
+                let (state, refresh, list) = (state.clone(), refresh.clone(), list.clone());
                 glib::spawn_future_local(async move {
-                    let installs = state.installs.clone();
+                    let (installs, runs) = (state.installs.clone(), state.runs.clone());
                     let res = blocking(move || {
-                        ids.iter()
-                            .map(|i| installs.stop_detached(*i).map(|left| left.len()))
+                        list.iter()
+                            .map(|r| stop_detached(&installs, &runs, r))
                             .collect::<Result<Vec<_>>>()
                     })
                     .await;
                     match res {
                         Some(Ok(left)) if left.iter().any(|n| *n > 0) => state
                             .toast("Some processes did not stop. They are shown as still running."),
-                        Some(Ok(_)) => state.toast("Stopped. You can retry the installation."),
+                        Some(Ok(_)) => state.toast("Stopped."),
                         Some(Err(e)) => state.toast(&e.to_string()),
                         None => {}
                     }
@@ -326,16 +339,19 @@ pub fn detached_banner(state: &Rc<AppState>) -> adw::Banner {
             d.present(Some(&state.window));
         });
     }
-    // Wait: poll until the detached processes are gone.
+    // Wait: poll every detached run until its processes are gone.
     {
         let (state, refresh) = (state.clone(), refresh);
         glib::spawn_future_local(async move {
             loop {
                 glib::timeout_future_seconds(3).await;
-                let installs = state.installs.clone();
+                let (installs, runs) = (state.installs.clone(), state.runs.clone());
                 let _ = blocking(move || {
-                    for (i, _) in installs.detached().unwrap_or_default() {
-                        let _ = installs.check_detached(i.id);
+                    for r in runs.detached().unwrap_or_default() {
+                        let _ = match r.install_id {
+                            Some(i) => installs.check_detached(i),
+                            None => runs.check_detached(r.id),
+                        };
                     }
                 })
                 .await;
@@ -377,7 +393,7 @@ pub fn quit_guard(state: &Rc<AppState>) {
                     .and_then(|i| db.get_game(i.game_id))
                     .map(|g| format!("{} (installer)", g.name))
                     .ok(),
-                _ => None,
+                _ => program_name(&r.argv),
             };
             names.push(n.unwrap_or_else(|| "a program".into()));
         }
@@ -408,10 +424,15 @@ pub fn quit_guard(state: &Rc<AppState>) {
                     let _ = blocking(move || {
                         let active = db.lock().unwrap_or_else(|e| e.into_inner()).active_runs().unwrap_or_default();
                         for r in &active {
-                            if let Some(i) = r.install_id {
-                                let _ = installs.cancel(i);
-                            } else if let Some(h) = runs.active(r.environment_id) {
-                                h.stop();
+                            match (r.install_id, runs.active(r.environment_id)) {
+                                (Some(i), _) if installs.is_active(i) => {
+                                    let _ = installs.cancel(i);
+                                }
+                                (_, Some(h)) if h.run_id() == r.id => h.stop(),
+                                // From an earlier session: no supervisor to ask, stop it here.
+                                _ => {
+                                    let _ = stop_detached(&installs, &runs, r);
+                                }
                             }
                         }
                         for _ in 0..60 {

@@ -28,7 +28,12 @@ fn fake_runtime() -> &'static Path {
         std::fs::create_dir_all(&bin).unwrap();
         let ws = r#"#!/bin/sh
 pidf="$WINEPREFIX/fake-wineserver.pid"
-alive() { [ -s "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; }
+alive() {
+  [ -s "$pidf" ] || return 1
+  st=$(cat "/proc/$(cat "$pidf")/stat" 2>/dev/null) || return 1
+  [ "${st##*) }" != "${st##*) Z}" ] && return 1  # zombie: dead, just unreaped
+  return 0
+}
 case "$1" in
   -w) while alive; do sleep 0.05; done; exit 0 ;;
   -k) if alive; then kill "$(cat "$pidf")"; exit 0; fi; exit 1 ;;
@@ -674,4 +679,24 @@ fn it_stop_mid_run_leaves_no_marker_process() {
         e.db.lock().unwrap().get_run(h.run_id()).unwrap().state,
         RunState::Stopped
     );
+}
+
+#[test]
+fn zombie_with_marker_is_not_listed() {
+    let marker = format!("zombie-test-{}", std::process::id());
+    let mut c = std::process::Command::new("true");
+    c.env("VORTEX_RUN_ID", &marker);
+    let child = c.spawn().unwrap();
+    let pid = child.id();
+    let is_zombie = || {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .is_ok_and(|s| s.rsplit(") ").next().is_some_and(|r| r.starts_with('Z')))
+    };
+    let end = Instant::now() + Duration::from_secs(5);
+    while !is_zombie() && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(is_zombie(), "child should be an unreaped zombie");
+    assert!(scan_marker(&marker).is_empty());
+    drop(child);
 }

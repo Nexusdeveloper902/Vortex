@@ -487,6 +487,11 @@ impl Supervisor {
             wake
         };
         let user_forced = matches!(wake, Wake::Forced);
+        if stopped && exit.is_none() {
+            // The marker vanishes from /proc/<pid>/environ at exit_mm, slightly before the
+            // kernel lets us reap umu-run; give try_wait a bounded moment to catch up.
+            wait_for(self.timing.stop_grace, || reap(&mut child, &mut exit));
+        }
         if exit.is_none() && !reap(&mut child, &mut exit) {
             // Forced while umu-run lives: reap it whenever it ends so it never stays a zombie.
             thread::spawn(move || child.wait());

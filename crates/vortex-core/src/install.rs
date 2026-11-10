@@ -650,33 +650,8 @@ fn game_status(s: InstallState) -> GameStatus {
     }
 }
 
-fn diag_exit(e: Option<Exit>) -> diagnose::Exit {
-    match e {
-        // Only the low 8 bits are known; map the reboot codes back so diagnose accepts them.
-        Some(x) if x.matches(3010) => diagnose::Exit::Code(3010),
-        Some(x) if x.matches(1641) => diagnose::Exit::Code(1641),
-        Some(Exit::Low8(c)) => diagnose::Exit::Code(i32::from(c)),
-        Some(Exit::Signal(s)) => diagnose::Exit::Signal(s),
-        None => diagnose::Exit::Unknown,
-    }
-}
-
 fn class_name(c: Class) -> String {
     format!("{c:?}")
-}
-
-fn findings_json(f: &[Finding]) -> String {
-    let v: Vec<_> = f
-        .iter()
-        .map(|f| {
-            serde_json::json!({
-                "class": class_name(f.class),
-                "confidence": format!("{:?}", f.confidence),
-                "evidence": f.evidence,
-            })
-        })
-        .collect();
-    serde_json::Value::Array(v).to_string()
 }
 
 fn source_missing() -> Finding {
@@ -953,17 +928,17 @@ impl Worker {
             .ok()
             .and_then(|r| std::fs::read(r.log_path).ok())
             .unwrap_or_default();
-        let lines: Vec<String> = String::from_utf8_lossy(&log)
-            .lines()
-            .skip_while(|l| *l != "--")
-            .skip(1)
-            .map(str::to_owned)
-            .collect();
-        diagnose::classify(kind, diag_exit(o.and_then(|o| o.exit)), &lines, &pre)
+        let lines = diagnose::log_lines(&String::from_utf8_lossy(&log));
+        diagnose::classify(
+            kind,
+            diagnose::exit_of(o.and_then(|o| o.exit)),
+            &lines,
+            &pre,
+        )
     }
 
     fn report(&self, run_id: i64, findings: &[Finding]) {
-        if let Err(e) = lock(&self.ctx.db).set_run_findings(run_id, &findings_json(findings)) {
+        if let Err(e) = lock(&self.ctx.db).set_run_findings(run_id, &diagnose::to_json(findings)) {
             self.send(InstallEvent::Error(format!("cannot save findings: {e}")));
         }
         for f in findings {

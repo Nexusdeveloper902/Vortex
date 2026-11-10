@@ -1281,6 +1281,7 @@ dependencies = [
  "directories",
  "flate2",
  "rusqlite",
+ "rustix",
  "serde_json",
  "sha2",
  "tar",

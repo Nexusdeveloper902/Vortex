@@ -80,8 +80,8 @@ must not list them (CI checks this). All decisions, validation and filesystem ef
 | `db` | the only SQL in the codebase | `Db::open(&Path)`, typed fns per table (`insert_game`, `set_install_state`, ...), `recover_on_startup()` |
 | `runtime` | find and validate Proton dirs | `discover(&Paths) -> Vec<Runtime>`, `validate(&Path) -> Result<Runtime>`, `Runtime::wineserver()` |
 | `runtime_ge` | GE-Proton install | `latest_release()`, `install(release, &Paths, progress: Sender<Progress>, cancel: &AtomicBool)` |
-| `runner` | translating an `Invocation` into argv/env/cwd | `Invocation::command(&Tools) -> Command` (pure; unit-tested by inspecting the Command) |
-| `process` | lifetime of one run | `start(inv, kind, &Db, events: Sender<RunEvent>) -> RunHandle`, `RunHandle::stop()`, `scan_marker(&str) -> Vec<ProcInfo>` |
+| `runner` | translating an `Invocation` into argv/env/cwd | `Invocation { program: Program::{Exe(HostPath), System(SystemExe), Winetricks}, args, cwd, prefix, runtime, env, verbose_log_dir }`, `preflight()`, `command(&Tools, marker) -> Command` (pure; unit-tested by inspecting the Command) |
+| `process` | lifetime of one run | `Runs::new(Paths, Tools, Arc<Mutex<Db>>)`, `Runs::start(RunSpec) -> (RunHandle, Receiver<RunEvent>)`, `RunHandle::{stop, mark_finished}`, `Runs::stop_detached(run_id)`, `scan_marker(&str) -> Vec<ProcInfo>` |
 | `source` | file vs dir analysis, ranking | `analyze(&HostPath) -> SourceAnalysis { kind, candidates: Vec<Candidate{path, score, reasons}>, ambiguous }` |
 | `install` | install state machine and recovery | `Install::begin(..)`, `advance(..)`, `exe_candidates(game) -> Vec<HostPath>`, `confirm_exe(..)` |
 | `launch` | game launch and "run another exe/msi" | `launch(game_id)`, `run_in_env(env_id, ExecTarget, args)` |
@@ -121,16 +121,17 @@ Rules:
 
 ```
 Command::new(tools.umu_run)                // default: "umu-run" resolved on PATH at startup
-  .arg(exe_host | in-prefix program name)  // "msiexec", "cmd", "wineboot" for built-ins
+  .arg(exe_host | r"C:\windows\system32\<name>.exe")  // built-ins by FULL path (cmd, msiexec, wineboot)
   .args(args)                              // argv array, never joined into a string
-  .current_dir(cwd_host)
-  .env("WINEPREFIX", prefix)               // absolute
-  .env("PROTONPATH", runtime_dir)          // absolute, validated (proton + toolmanifest.vdf)
+  .current_dir(cwd_host)                   // the only way the Windows cwd is set
   .env("GAMEID", "0")                      // no protonfixes unless the user overrides GAMEID
-  .env("VORTEX_RUN_ID", marker)            // 32 hex chars from /dev/urandom, unique per run
-  .env("STEAM_COMPAT_INSTALL_PATH", dir)   // only when arg 1 is not a host file (msiexec)
-  .env("PRESSURE_VESSEL_FILESYSTEMS_RW", ..) // source/install dirs outside $HOME,/mnt,/media,/run/media,/srv,/opt
+  .env("PROTON_SET_GAME_DRIVE", "0")       // no S: game drive (see below); user may override
   .envs(user_env)                          // per-game vars, validated (section 11)
+  .env("WINEPREFIX", prefix)               // absolute
+  .env("PROTONPATH", runtime_dir)          // absolute, validated (proton + toolmanifest.vdf + wineserver)
+  .env("VORTEX_RUN_ID", marker)            // 32 hex chars from /dev/urandom, unique per run
+  .env("STEAM_COMPAT_INSTALL_PATH", dir)   // ALWAYS: exe's dir for host exes, else cwd_host
+  .env("PRESSURE_VESSEL_FILESYSTEMS_RW", ..) // cwd / exe dir outside $HOME,/mnt,/media,/run/media,/srv,/opt,/tmp
   .stdin(null).stdout(piped).stderr(piped)
   .process_group(0)                        // only isolates Vortex's terminal signals; NOT used for stop
 ```
@@ -138,19 +139,39 @@ Command::new(tools.umu_run)                // default: "umu-run" resolved on PAT
 - Inherited environment is kept (DISPLAY, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, ...). Reserved names
   (`WINEPREFIX`, `PROTONPATH`, `VORTEX_RUN_ID`, `STEAM_COMPAT_*`, `PRESSURE_VESSEL_*`) cannot be set
   by the user. `GAMEID`, `PROTON_*`, `DXVK_*`, `VKD3D_*`, `WINEDLLOVERRIDES` can.
+- **Built-ins by full path [VL M1 F1]**: with a bare name (`cmd`, `msiexec`) umu-run logs
+  "Executable not found", passes the name through, and always exits 0, losing the real code. As
+  `C:\windows\system32\cmd.exe` the code propagates (umu still logs the same benign warning).
+  `winetricks` is the only bare name (umu special-cases it).
+- **Exit codes are 8 bits [VL]**: 3010 arrives as 194, 1641 as 105, 1627 as 91.
+  `process::Exit::Low8(u8)` carries only that; `Exit::matches(3010)` compares modulo 256. The full
+  Windows code is never known, and no exit code alone means success for installers.
+- **Output [VL M1 F2]**: the program's own console output does not reach umu-run's pipes. Logs carry
+  umu/Proton/Wine lines only (plus `vortex: ` supervisor notes).
+- **Game drive [VL M7]**: umu sets `STEAM_COMPAT_LIBRARY_PATHS` to the first non-root mount point above
+  `STEAM_COMPAT_INSTALL_PATH` (empty when there is none, or when the install path is empty, as it was for
+  bare built-ins). Proton's `try_get_game_library_dir` then logs
+  `Proton: Error: unable to use parent for game drive, path <that value>` (empty when none) on **every**
+  run unless the path is a real Steam `steamapps` dir. The line is benign and cannot be suppressed
+  from outside. With the game drive enabled, Proton maps `S:` to that mount, so a cwd under `/tmp` showed as
+  `S:\vortex-...` instead of `Z:\tmp\vortex-...`, and `S:` changes from run to run.
+  `PROTON_SET_GAME_DRIVE=0` removes `S:`, and cwd/exe then follow `paths::to_win` (`C:` / `Z:`).
 - No `--config` TOML (no env/cwd control). No `PROTON_VERB` (default `waitforexitandrun` serialises
   against a previous wineserver in the same prefix, which is what we want).
-- Prefix init: `umu-run wineboot -u`, exit code 0 required. First ever run downloads the Steam Linux
-  Runtime (~700 MB); its stderr is streamed so the UI shows progress text.
-- Installer EXE: arg = `exe_host`, `cwd_host` = installer's parent dir. MSI: `msiexec /i <exe_win>`,
-  `cwd_host` = msi's parent, `STEAM_COMPAT_INSTALL_PATH` = msi's parent (path handling **[SPIKE S7]**).
+- Prefix init: `umu-run C:\windows\system32\wineboot.exe -u`, exit code 0 required [VL M7]. First ever
+  run downloads the Steam Linux Runtime (~700 MB); its stderr is streamed so the UI shows progress text.
+- Installer EXE: program = `exe_host`, `cwd_host` = installer's parent. MSI:
+  `C:\windows\system32\msiexec.exe /i <exe_win> /qn?`, `cwd_host` = msi's parent (so
+  `STEAM_COMPAT_INSTALL_PATH` = msi's parent). `Z:\` paths install [VL M1 S7, M7]; a missing MSI gives 2.
 - Verbose mode (per-run toggle): `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=<run log dir>`.
   umu then prints the whole environment, which is why redaction runs on every line (section 10).
-- Before spawning: refuse if `geteuid() == 0`; verify `exe_host` exists and is a regular file;
-  verify the runtime still validates; verify the source dir is readable. Failures become
-  `diagnose` findings (`MissingExecutable`, `RuntimeMissing`, `MissingInstallerData`), not spawns.
-- One active run per environment, enforced in core (`Mutex<HashMap<EnvId, RunHandle>>`). The
-  `wineserver -w` barrier is per prefix, so concurrent runs in one prefix would wait on each other.
+- Before spawning (`Invocation::preflight`): refuse if `geteuid() == 0`; validate user env; verify
+  `exe_host` is a regular file and `cwd_host` a dir; verify the runtime still validates and has a
+  wineserver. Failures (`Validation`, `NotFound`, `RuntimeInvalid`) become `diagnose` findings
+  (`MissingExecutable`, `RuntimeMissing`, `MissingInstallerData`), not spawns.
+- One active run per environment, enforced in core by `process::Runs` (in-memory map plus a check for a
+  `running|waiting` row of a detached run) -> `Error::Busy`. The `wineserver -w` barrier is per
+  prefix, so concurrent runs in one prefix would wait on each other.
 
 ## 6. Process lifecycle: completion and stop
 

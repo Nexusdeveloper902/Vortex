@@ -17,7 +17,7 @@
 
 use crate::db::{
     Db, GameStatus, Install, InstallState, NewEnv, NewGame, NewInstall, Recovery, Run, RunKind,
-    RunState, SourceKind, proc_start_time,
+    SourceKind,
 };
 use crate::diagnose::{self, Class, Confidence, Finding, Preflight};
 use crate::error::{EnvId, Error, Result};
@@ -455,10 +455,11 @@ impl Installs {
     /// Installs whose run survived a previous Vortex session ("running (detached)"). The UI offers
     /// [`Installs::stop_detached`] and polls [`Installs::check_detached`].
     pub fn detached(&self) -> Result<Vec<(Install, Run)>> {
+        let runs = self.ctx.runs.detached()?;
         let db = lock(&self.ctx.db);
         let active = lock(&self.ctx.active);
         let mut out = Vec::new();
-        for r in db.active_runs()? {
+        for r in runs {
             if let Some(id) = r.install_id
                 && !active.contains_key(&id)
             {
@@ -468,18 +469,15 @@ impl Installs {
         Ok(out)
     }
 
-    /// For a detached install: true while its processes live. Once they are gone the run and the
-    /// install become `interrupted` (the user can then retry or mark the installer finished).
+    /// For a detached install: true while its processes live ([`Runs::check_detached`]). Once
+    /// they are gone the run and the install become `interrupted` (the user can then retry or
+    /// mark the installer finished).
     pub fn check_detached(&self, install_id: i64) -> Result<bool> {
         let run = self.detached_run(install_id)?;
-        let pid_alive = matches!((run.pid, run.pid_start),
-            (Some(p), Some(s)) if proc_start_time(p) == Some(s));
-        if pid_alive || !scan_marker(&run.marker).is_empty() {
+        if self.ctx.runs.check_detached(run.id)? {
             return Ok(true);
         }
-        let mut db = lock(&self.ctx.db);
-        db.finish_run(run.id, RunState::Interrupted, None, false)?;
-        db.set_install_state(
+        lock(&self.ctx.db).set_install_state(
             install_id,
             InstallState::Interrupted,
             None,

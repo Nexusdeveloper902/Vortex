@@ -426,6 +426,177 @@ fn mark_finished_then_stop_detached() {
     assert!(scan_marker(h.marker()).is_empty());
 }
 
+/// F5: after a stop that leaves marker processes, the run stays Uncertain (env busy) and keeps
+/// watching, without stopping again on its own, until they are gone.
+#[test]
+fn stop_with_survivors_stays_uncertain_until_they_are_gone() {
+    let Some(e) = fake_env() else { return };
+    let t0 = Instant::now();
+    let (h, rx) = e.fake("respawn:5,sleep:30").unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    h.stop();
+    let mut uncertain_at = None;
+    let mut stops = 0;
+    let end = Instant::now() + T;
+    let o = loop {
+        assert!(Instant::now() < end, "no Finished");
+        match rx.try_recv() {
+            Ok(RunEvent::Finished(o)) => break o,
+            Ok(RunEvent::Uncertain(_)) if uncertain_at.is_none() => {
+                uncertain_at = Some(t0.elapsed());
+                assert!(
+                    e.runs.active(e.env_id).is_some(),
+                    "env unlocked while Uncertain"
+                );
+                assert!(matches!(e.fake("exit:0"), Err(Error::Busy(_))));
+            }
+            Ok(RunEvent::Line { text, .. }) if text == "vortex: stop requested" => stops += 1,
+            Ok(_) => {}
+            Err(_) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    assert!(uncertain_at.is_some(), "stop should have left survivors");
+    assert_eq!(stops, 1, "one Stop runs the sequence once");
+    assert!(
+        t0.elapsed() >= Duration::from_secs(4),
+        "Finished at {:?} while the respawner (4-5 s) was alive",
+        t0.elapsed()
+    );
+    assert!(o.stopped && !o.user_forced);
+    assert!(scan_marker(h.marker()).is_empty());
+    assert_eq!(
+        e.db.lock().unwrap().get_run(h.run_id()).unwrap().state,
+        RunState::Stopped
+    );
+}
+
+/// Records a `running` row for a marked process this session does not supervise, like one left
+/// by a previous Vortex session.
+fn detached_row(e: &Env, kind: RunKind, child: &std::process::Child, marker: &str) -> i64 {
+    let db = e.db.lock().unwrap();
+    let id = db
+        .insert_run(&vortex_core::db::NewRun {
+            marker: marker.into(),
+            kind,
+            environment_id: e.env_id,
+            game_id: None,
+            install_id: None,
+            argv: r#"["umu-run","/g/game.exe"]"#.into(),
+            log_path: String::new(),
+        })
+        .unwrap();
+    let pid = i64::from(child.id());
+    db.set_run_pid(id, pid, vortex_core::db::proc_start_time(pid))
+        .unwrap();
+    id
+}
+
+fn marked(marker: &str, secs: &str) -> std::process::Child {
+    std::process::Command::new("sleep")
+        .arg(secs)
+        .env("VORTEX_RUN_ID", marker)
+        .spawn()
+        .unwrap()
+}
+
+/// F1: a detached launch is listed, blocks the env, and finishes as `interrupted` (exit unknown)
+/// once its processes are gone.
+#[test]
+fn detached_launch_is_watched_and_finished() {
+    let Some(e) = fake_env() else { return };
+    let marker = format!("det-launch-{}", std::process::id());
+    let mut child = marked(&marker, "1");
+    let id = detached_row(&e, RunKind::Launch, &child, &marker);
+    let det = e.runs.detached().unwrap();
+    assert_eq!(det.iter().map(|r| r.id).collect::<Vec<_>>(), [id]);
+    assert!(e.runs.check_detached(id).unwrap());
+    assert!(matches!(e.fake("exit:0"), Err(Error::Busy(_))));
+    child.wait().unwrap();
+    assert!(!e.runs.check_detached(id).unwrap());
+    let run = e.db.lock().unwrap().get_run(id).unwrap();
+    assert_eq!((run.state, run.exit_code), (RunState::Interrupted, None));
+    assert!(e.runs.detached().unwrap().is_empty());
+    let (_, rx) = e.fake("exit:0").unwrap();
+    collect(&rx, T);
+    // A run supervised in this session is never listed as detached.
+    let (h, rx) = e.fake("sleep:1").unwrap();
+    assert!(e.runs.detached().unwrap().is_empty());
+    assert!(e.runs.check_detached(h.run_id()).unwrap());
+    collect(&rx, T);
+}
+
+/// F1: a detached exec run is stoppable without a supervisor.
+#[test]
+fn detached_exec_is_stoppable() {
+    let Some(e) = fake_env() else { return };
+    let marker = format!("det-exec-{}", std::process::id());
+    let mut child = marked(&marker, "30");
+    let id = detached_row(&e, RunKind::Exec, &child, &marker);
+    assert!(e.runs.stop_detached(id).unwrap().is_empty());
+    assert!(scan_marker(&marker).is_empty());
+    assert_eq!(
+        e.db.lock().unwrap().get_run(id).unwrap().state,
+        RunState::Stopped
+    );
+    child.wait().unwrap();
+    assert!(e.runs.detached().unwrap().is_empty());
+}
+
+/// F2: a reservation makes `start` Busy until it is dropped, and cannot be taken while a run
+/// (or another reservation) holds the environment.
+#[test]
+fn reservation_holds_the_environment() {
+    let Some(e) = fake_env() else { return };
+    let g = e.runs.reserve(e.env_id).unwrap();
+    assert!(matches!(e.fake("exit:0"), Err(Error::Busy(id)) if id == e.env_id));
+    assert!(matches!(e.runs.reserve(e.env_id), Err(Error::Busy(_))));
+    assert!(
+        e.runs.active(e.env_id).is_none(),
+        "a reservation is not a run"
+    );
+    drop(g);
+    let (h, rx) = e.fake("sleep:1").unwrap();
+    assert!(matches!(e.runs.reserve(e.env_id), Err(Error::Busy(_))));
+    collect(&rx, T);
+    drop(h);
+    drop(e.runs.reserve(e.env_id).unwrap());
+    // A detached row blocks it too.
+    let marker = format!("det-res-{}", std::process::id());
+    let mut child = marked(&marker, "30");
+    let id = detached_row(&e, RunKind::Launch, &child, &marker);
+    assert!(matches!(e.runs.reserve(e.env_id), Err(Error::Busy(_))));
+    assert!(e.runs.stop_detached(id).unwrap().is_empty());
+    child.wait().unwrap();
+}
+
+/// F12: process names (cmdlines) are redacted before they reach events and notes.
+#[test]
+fn process_names_and_notes_are_redacted() {
+    let Some(e) = fake_env() else { return };
+    let inv = e.inv(
+        e.setup_exe(),
+        &["GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123"],
+        &[("FAKE_UMU_MODE", "sleep:1")],
+    );
+    let (h, rx) = e.runs.start(e.spec(inv)).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let names = scan_marker(h.marker());
+    assert!(
+        names.iter().any(|p| p.name.contains("<redacted>")),
+        "{names:?}"
+    );
+    let (evs, _) = collect(&rx, T);
+    for ev in &evs {
+        let text = match ev {
+            RunEvent::Line { text, .. } => text.clone(),
+            RunEvent::Processes(l) | RunEvent::Uncertain(l) => format!("{l:?}"),
+            _ => continue,
+        };
+        assert!(!text.contains("ghp_"), "{text}");
+    }
+    assert!(names.iter().all(|p| !p.name.contains("ghp_")), "{names:?}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Real umu-run + Proton. Run with:
 //   VORTEX_IT_PROTON="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental" \

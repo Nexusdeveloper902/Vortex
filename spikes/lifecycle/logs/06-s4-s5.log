@@ -1,0 +1,66 @@
+[20:41:25.045] s4: cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-multi (exe by absolute Z: path)
+[20:41:25.047] s4: umu-run pid=105332 marker=2dd636217c805c1478696794fecd966f cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-multi argv=cmd /c Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi\setup.bat
+[20:41:28.686] s4: rc=0
+    cwd=Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi
+    dp0=Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi\
+    marker=2dd636217c805c1478696794fecd966f
+    data1_rel=found
+    DATA1-CONTENT-OK
+    setup1_rel=found
+    prereq_rel_call=ok
+[20:41:29.128] s4: cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/vtest-multi (exe by absolute Z: path)
+[20:41:29.131] s4: umu-run pid=106109 marker=78544311dcbb48e0a2a8829a941d0167 cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/vtest-multi argv=cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\vtest-multi\setup.bat
+[20:41:32.572] s4: rc=0
+    cwd=Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\vtest-multi
+    dp0=Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\vtest-multi\
+    marker=78544311dcbb48e0a2a8829a941d0167
+    data1_rel=found
+    DATA1-CONTENT-OK
+    setup1_rel=found
+    prereq_rel_call=ok
+[20:41:32.704] s4: cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx/drive_c/vtest-multi (exe by absolute Z: path)
+[20:41:32.707] s4: umu-run pid=106467 marker=a51fb7565bf4455486baf9e2dc946249 cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx/drive_c/vtest-multi argv=cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\pfx\drive_c\vtest-multi\setup.bat
+[20:41:36.270] s4: rc=0
+    cwd=C:\vtest-multi
+    dp0=Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\pfx\drive_c\vtest-multi\
+    marker=a51fb7565bf4455486baf9e2dc946249
+    data1_rel=found
+    DATA1-CONTENT-OK
+    setup1_rel=found
+    prereq_rel_call=ok
+[20:41:36.281] s4: NEGATIVE: cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 (not the installer dir), exe by absolute path
+[20:41:36.284] s4: umu-run pid=106870 marker=ed9c293fd3dd0d4ff3649abdffede23b cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1 argv=cmd /c Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi\setup.bat
+[20:41:40.016] s4: rc=0
+    cwd=Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1
+    dp0=Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi\
+    marker=ed9c293fd3dd0d4ff3649abdffede23b
+    data1_rel=missing
+    File not found.
+    
+    Failed to open 'data1.bin'
+    setup1_rel=missing
+[20:41:40.373] s4: drive_c via C: path: cmd /c C:\vtest-multi\setup.bat, cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx/drive_c/vtest-multi
+[20:41:40.376] s4: umu-run pid=107374 marker=fbf8f01bbd6aee7f290f65e1c86ae00f cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/pfx/drive_c/vtest-multi argv=cmd /c C:\vtest-multi\setup.bat
+[20:41:44.222] s4: rc=0
+    cwd=C:\vtest-multi
+    dp0=C:\vtest-multi\
+    marker=fbf8f01bbd6aee7f290f65e1c86ae00f
+    data1_rel=found
+    DATA1-CONTENT-OK
+    setup1_rel=found
+    prereq_rel_call=ok
+[20:41:44.458] s5: .bat passed directly to umu-run as a host path (no cmd /c)
+[20:41:44.460] s5: umu-run pid=108143 marker=1c94c5338950749fa93b33f9f7fe389d cwd=/home/jperez/.cache/vortex-m1-spike/home/vtest-multi5 argv=/home/jperez/.cache/vortex-m1-spike/home/vtest-multi5/setup.bat
+[20:41:48.114] s5: rc=0
+    cwd=Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi5
+    dp0=Z:\home\jperez\.cache\vortex-m1-spike\home\vtest-multi5\
+    marker=1c94c5338950749fa93b33f9f7fe389d
+    data1_rel=found
+    DATA1-CONTENT-OK
+    setup1_rel=found
+    prereq_rel_call=ok
+    err: Proton: Error: unable to use parent for game drive, path 
+    err: ntsync: up and running.
+    err: WARNING: radv is not a conformant Vulkan implementation, testing use only.
+    err: WARNING: radv is not a conformant Vulkan implementation, testing use only.
+    err: WARNING: radv is not a conformant Vulkan implementation, testing use only.

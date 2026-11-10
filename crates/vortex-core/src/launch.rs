@@ -5,13 +5,14 @@
 //! supervises. One active run per environment (`Error::Busy`).
 
 use crate::db::{Db, Environment, Game, RunKind};
+use crate::diagnose::{self, Preflight};
 use crate::error::{Error, Result};
 use crate::paths::{HostPath, Paths, PrefixDir, to_win};
 use crate::process::{RunEvent, RunHandle, RunSpec, Runs};
 use crate::runner::{Invocation, Program, SystemExe};
 use async_channel::Receiver;
 use std::collections::BTreeMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 type Started = (RunHandle, Receiver<RunEvent>);
 
@@ -74,20 +75,66 @@ pub fn game_invocation(game: &Game, prefix: PrefixDir, runtime: HostPath) -> Res
 
 /// Launches a registered game. Errors before anything is written or spawned: `NotFound` (exe or
 /// cwd missing), `Validation`, `RuntimeInvalid`, `Busy`.
-pub fn launch_game(runs: &Runs, db: &Mutex<Db>, paths: &Paths, game_id: i64) -> Result<Started> {
+///
+/// When the run ends, its whole log is classified (`diagnose`, kind launch) and the findings are
+/// stored in `runs.findings` before `Finished` is forwarded (not after a user stop), so a failed launch can be explained
+/// (spec 10/18) with [`crate::diagnose::from_json`].
+pub fn launch_game(
+    runs: &Runs,
+    db: &Arc<Mutex<Db>>,
+    paths: &Paths,
+    game_id: i64,
+) -> Result<Started> {
     let game = db
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get_game(game_id)?;
     let (_, prefix, runtime) = environment_of(paths, db, game.environment_id)?;
     let invocation = game_invocation(&game, prefix, runtime)?;
-    runs.start(RunSpec {
+    let cwd_is_exe_dir = match &invocation.program {
+        Program::Exe(exe) => Some(exe.parent().as_ref() == Some(&invocation.cwd)),
+        _ => None,
+    };
+    let (handle, rx) = runs.start(RunSpec {
         kind: RunKind::Launch,
         env_id: game.environment_id,
         game_id: Some(game_id),
         install_id: None,
         invocation,
-    })
+    })?;
+    let (tx, out) = async_channel::bounded(1024);
+    let (db, run_id) = (db.clone(), handle.run_id());
+    std::thread::spawn(move || {
+        while let Ok(ev) = rx.recv_blocking() {
+            // A stop or "mark as finished" is the user's doing, not a failure to explain.
+            if let RunEvent::Finished(o) = &ev
+                && !o.stopped
+                && !o.user_forced
+            {
+                let db = db.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Ok(run) = db.get_run(run_id) {
+                    let log = std::fs::read(&run.log_path).unwrap_or_default();
+                    let pre = Preflight {
+                        exe_exists: Some(true),
+                        runtime_valid: Some(true),
+                        cwd_is_exe_dir,
+                        ..Preflight::default()
+                    };
+                    let f = diagnose::classify(
+                        diagnose::RunKind::Launch,
+                        diagnose::exit_of(o.exit),
+                        &diagnose::log_lines(&String::from_utf8_lossy(&log)),
+                        &pre,
+                    );
+                    let _ = db.set_run_findings(run_id, &diagnose::to_json(&f));
+                }
+            }
+            if tx.send_blocking(ev).is_err() {
+                break;
+            }
+        }
+    });
+    Ok((handle, out))
 }
 
 /// Runs an arbitrary `.exe` (with `args`) or `.msi` (via `msiexec /i`) inside an existing

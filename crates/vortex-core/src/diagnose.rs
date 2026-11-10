@@ -166,6 +166,15 @@ impl Confidence {
     }
 }
 
+/// Low byte of Windows exception codes a crashed process exits with, and their names.
+const CRASH_STATUS: &[(i32, &str)] = &[
+    (0x05, "STATUS_ACCESS_VIOLATION (0xC0000005)"),
+    (0x1d, "STATUS_ILLEGAL_INSTRUCTION (0xC000001D)"),
+    (0x94, "STATUS_INTEGER_DIVIDE_BY_ZERO (0xC0000094)"),
+    (0xfd, "STATUS_STACK_OVERFLOW (0xC00000FD)"),
+    (0x09, "STATUS_STACK_BUFFER_OVERRUN (0xC0000409)"),
+];
+
 pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) -> Vec<Finding> {
     let mut out = Vec::new();
     let why = |s: &str| s.to_owned();
@@ -249,6 +258,19 @@ pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) ->
             &format!("terminated by signal {s}"),
         );
     }
+    // Wine's own crash report does not reach umu-run's pipes and only the low 8 bits of the
+    // exit code survive, so a crashed game is recognised by the low byte of its NTSTATUS.
+    // A program may exit with these values on purpose: Likely only.
+    if let (Exit::Code(c), RunKind::Launch) = (exit, kind)
+        && let Some((_, name)) = CRASH_STATUS.iter().find(|(low, _)| *low == c)
+    {
+        push(
+            &mut out,
+            Class::AppCrash,
+            Confidence::Likely,
+            &format!("exit code {c} is the low byte of {name}"),
+        );
+    }
     if out.is_empty() && failed {
         if kind == RunKind::Install {
             push(
@@ -267,6 +289,81 @@ pub fn classify(kind: RunKind, exit: Exit, lines: &[String], pre: &Preflight) ->
         }
     }
     out
+}
+
+/// Maps a run's exit (only the low 8 bits are known) to [`Exit`]; the installer reboot codes
+/// 3010 / 1641 are mapped back so `classify` accepts them.
+pub fn exit_of(e: Option<crate::process::Exit>) -> Exit {
+    use crate::process::Exit as P;
+    match e {
+        Some(x) if x.matches(3010) => Exit::Code(3010),
+        Some(x) if x.matches(1641) => Exit::Code(1641),
+        Some(P::Low8(c)) => Exit::Code(i32::from(c)),
+        Some(P::Signal(s)) => Exit::Signal(s),
+        None => Exit::Unknown,
+    }
+}
+
+/// The output lines of a run log: everything after the header's `--` separator.
+pub fn log_lines(log: &str) -> Vec<String> {
+    log.lines()
+        .skip_while(|l| *l != "--")
+        .skip(1)
+        .map(str::to_owned)
+        .collect()
+}
+
+const CLASSES: &[Class] = &[
+    Class::InstallerFailure,
+    Class::RuntimeInitFailure,
+    Class::MissingDependency,
+    Class::MissingExecutable,
+    Class::AppCrash,
+    Class::MissingInstallerData,
+    Class::WrongWorkingDirectory,
+    Class::GraphicsPrerequisite,
+    Class::Unknown,
+];
+
+/// The JSON stored in `runs.findings`: `[{"class", "confidence", "evidence"}]`.
+pub fn to_json(f: &[Finding]) -> String {
+    let v: Vec<_> = f
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "class": format!("{:?}", f.class),
+                "confidence": format!("{:?}", f.confidence),
+                "evidence": f.evidence,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(v).to_string()
+}
+
+/// Inverse of [`to_json`]; unreadable input or entries give no findings.
+pub fn from_json(s: &str) -> Vec<Finding> {
+    let v: Vec<serde_json::Value> = serde_json::from_str(s).unwrap_or_default();
+    v.iter()
+        .filter_map(|f| {
+            let class = *CLASSES
+                .iter()
+                .find(|c| format!("{c:?}") == f["class"].as_str().unwrap_or(""))?;
+            let confidence = match f["confidence"].as_str()? {
+                "Confirmed" => Confidence::Confirmed,
+                _ => Confidence::Likely,
+            };
+            let evidence = f["evidence"]
+                .as_array()?
+                .iter()
+                .filter_map(|e| e.as_str().map(str::to_owned))
+                .collect();
+            Some(Finding {
+                class,
+                confidence,
+                evidence,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -591,5 +688,52 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn findings_json_roundtrip() {
+        let f = vec![
+            Finding {
+                class: Class::AppCrash,
+                confidence: Confidence::Confirmed,
+                evidence: vec!["wine: Unhandled page fault".into()],
+            },
+            Finding {
+                class: Class::Unknown,
+                confidence: Confidence::Likely,
+                evidence: vec![],
+            },
+        ];
+        assert_eq!(from_json(&to_json(&f)), f);
+        assert!(from_json("not json").is_empty());
+        assert_eq!(
+            log_lines("kind: launch\n--\nE|a\nO|b"),
+            vec!["E|a".to_string(), "O|b".to_string()]
+        );
+        assert_eq!(
+            exit_of(Some(crate::process::Exit::Low8(194))),
+            Exit::Code(3010)
+        );
+        assert_eq!(
+            exit_of(Some(crate::process::Exit::Low8(42))),
+            Exit::Code(42)
+        );
+    }
+
+    #[test]
+    fn crash_exit_codes_are_likely_app_crash_for_launches_only() {
+        let pre = Preflight::default();
+        let f = classify(RunKind::Launch, Exit::Code(5), &[], &pre);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(
+            (f[0].class, f[0].confidence),
+            (Class::AppCrash, Confidence::Likely)
+        );
+        assert!(f[0].evidence[0].contains("0xC0000005"));
+        let f = classify(RunKind::Launch, Exit::Code(42), &[], &pre);
+        assert_eq!(f[0].class, Class::Unknown);
+        // Installers use small exit codes for ordinary failures.
+        let f = classify(RunKind::Install, Exit::Code(5), &[], &pre);
+        assert_eq!(f[0].class, Class::InstallerFailure);
     }
 }

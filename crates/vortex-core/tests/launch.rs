@@ -220,6 +220,27 @@ fn launch_passes_args_env_and_exe_dir_cwd() {
 }
 
 #[test]
+fn finished_launch_is_diagnosed_before_finished() {
+    use vortex_core::diagnose::{Class, from_json};
+    let Some(e) = fake_env() else { return };
+    let ok = e.game(&[], &[("FAKE_UMU_MODE", "exit:0")], None);
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, ok).unwrap();
+    assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(0)));
+    let f = e.db.lock().unwrap().get_run(h.run_id()).unwrap().findings;
+    assert_eq!(f.as_deref(), Some("[]"));
+
+    let bad = e.game(&[], &[("FAKE_UMU_MODE", "exit:42")], None);
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, bad).unwrap();
+    assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(42)));
+    // Stored before Finished was forwarded.
+    let f = e.db.lock().unwrap().get_run(h.run_id()).unwrap().findings;
+    let f = from_json(&f.expect("findings stored"));
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].class, Class::Unknown);
+    assert!(f[0].evidence[0].contains("42"), "{f:?}");
+}
+
+#[test]
 fn configured_work_dir_wins() {
     let Some(e) = fake_env() else { return };
     let out = e.dir.as_path().join("rec.out");

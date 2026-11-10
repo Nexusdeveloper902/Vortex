@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(ge.version.as_deref(), Some("GE-Proton9-1"));
         assert!(ge.wineserver().unwrap().ends_with("files/bin/wineserver"));
         assert!(
-            found[0]
+            found[1]
                 .wineserver()
                 .unwrap()
                 .ends_with("dist/bin/wineserver")

@@ -15,7 +15,7 @@ use vortex_core::install::{
     InstallEvent, InstallRequest, Installs, RegisterEnv, RegisterRequest, Started, scan_exes,
 };
 use vortex_core::paths::{HostPath, Paths, PrefixDir};
-use vortex_core::process::{Outcome, RunEvent, Runs, Timing, scan_marker};
+use vortex_core::process::{Outcome, Phase, RunEvent, Runs, Timing, scan_marker};
 use vortex_core::runner::Tools;
 
 const MANIFEST: &str = env!("CARGO_MANIFEST_DIR");
@@ -45,7 +45,12 @@ fn fake_tools() -> &'static Path {
             &rt.join("files/bin/wineserver"),
             r#"#!/bin/sh
 pidf="$WINEPREFIX/fake-wineserver.pid"
-alive() { [ -s "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; }
+alive() {
+  [ -s "$pidf" ] || return 1
+  st=$(cat "/proc/$(cat "$pidf")/stat" 2>/dev/null) || return 1
+  case "${st##*) }" in Z*) return 1 ;; esac  # zombie: dead, just unreaped
+  return 0
+}
 case "$1" in
   -w) while alive; do sleep 0.05; done; exit 0 ;;
   -k) if alive; then kill "$(cat "$pidf")"; exit 0; fi; exit 1 ;;
@@ -423,7 +428,12 @@ fn source_removed_mid_install_is_missing_installer_data() {
     let mut finding_while_running = false;
     let mut finished = false;
     let evs = drive(&s.events, LIMIT, |ev| match ev {
-        InstallEvent::State(InstallState::Running) => {
+        // Remove only once the installer process is up: removing at State(Running) can beat
+        // the spawn (its cwd would be gone), which is a spawn error, not a lost source.
+        InstallEvent::Run {
+            event: RunEvent::Phase(Phase::Running),
+            kind: RunKind::Install,
+        } => {
             std::fs::remove_dir_all(src.as_path()).unwrap();
         }
         InstallEvent::Finding(f) if f.class == Class::MissingInstallerData && !finished => {

@@ -1,0 +1,6 @@
+INFO: umu-launcher version 1.4.4
+INFO: steamrt4 updates disabled, skipping
+WARNING: Executable not found: /nonexistent/foo.exe
+INFO: Running 'Proton - Experimental' using runtime 'steamrt4'
+INFO: Running 'steamrt4' using runtime 'host'
+Proton: Error: unable to use parent for game drive, path 

@@ -23,6 +23,21 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      # release-please bumps workspace.package.version but cannot bump the workspace crates in
+      # Cargo.lock, and every build uses --locked. Sync the lockfile on the release PR branch.
+      - uses: actions/checkout@v4
+        if: steps.rp.outputs.pr
+        with:
+          ref: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+      - name: Sync Cargo.lock on the release PR
+        if: steps.rp.outputs.pr
+        run: |
+          cargo update --workspace
+          git diff --quiet Cargo.lock && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: sync Cargo.lock"
+          git push
 
   # A release-please release, or a manually pushed v* tag. Tags created by release-please with
   # GITHUB_TOKEN do not trigger tag workflows, hence the release_created output.

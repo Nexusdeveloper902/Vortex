@@ -173,7 +173,7 @@ Run phases, each emitted as `RunEvent::Phase`:
    `plugplay.exe`, `explorer.exe`, `rpcss.exe`, `svchost.exe`, `steam.exe`, `pv-adverb`, `srt-bwrap`, umu python).
 2. **WaitingForChildren**: run `WINEPREFIX=<prefix> <runtime>/files/bin/wineserver -w`
    (fall back to `dist/bin`). Returns when the prefix's wineserver exits, i.e. no Wine process of
-   that prefix remains **[SPIKE S1: behaviour when no server runs; behaviour from host]**. No timeout:
+   that prefix remains [VL M1: from the host it returns rc 0 at once and starts nothing when no server runs, and blocks while one runs]. No timeout:
    a prerequisite installer may sit on a dialog for an hour. The UI shows "Waiting for background
    processes: <names>" with **Stop** and **Mark as finished**.
 3. **Draining**: poll the marker scan once per second for up to 10 s for non-Wine leftovers
@@ -182,14 +182,17 @@ Run phases, each emitted as `RunEvent::Phase`:
 4. **Finished { exit_code, user_forced: bool }**. The umu-run exit code is reported but is not by
    itself success or failure for installers (installers return 3010, 1641, etc.); `diagnose` decides.
 
-Fallback if **[SPIKE S2]** shows the marker is lost (installer passes a custom environment block to
+[VL M1 S2: the marker reached every process, including a child created with a custom Win32 env block,
+because Wine builds the Unix environ itself. The fallback below is kept only as documentation, not built.]
+Fallback if the marker is lost (installer passes a custom environment block to
 `CreateProcess`, or a Wine service started outside the run): `wineserver -w` stays the authoritative
 barrier; the process list for the UI falls back to "descendants of umu-run by PPid plus processes whose
 `/proc/<pid>/cmdline` exe lies under the prefix or source dir".
 
 ### 6.3 Stop (game Stop, cancel install, Stop leftovers)
 
-1. `WINEPREFIX=<prefix> <runtime wineserver> -k` [VL rc 0 from host]. Wait up to 5 s for umu-run.
+1. `WINEPREFIX=<prefix> <runtime wineserver> -k` [VL rc 0 from host; **rc 1 when no server runs = nothing
+   to stop, not an error**]. Wait up to 5 s for umu-run. [VL M1: this step alone cleared 21 processes in 0.08 s]
 2. SIGTERM umu-run if alive (its handler forwards to its whole tree). Wait up to 5 s.
 3. SIGKILL every process still matching the marker. Before each kill re-read its environ to guard
    against pid reuse. `// ponytail: re-check then kill has a tiny pid-reuse race; use pidfd if it bites.`
@@ -201,7 +204,9 @@ umu-run is not killed with Vortex (no PDEATHSIG). On quit with active runs the U
 in background, or Stop. On next start `db::recover_on_startup` checks every run in `running|waiting`:
 pid alive with matching `/proc/<pid>/stat` start time, or any marker process present -> keep state,
 show "running (detached)" with Stop (section 6.3, works without pipes). Otherwise the run becomes
-`interrupted`. Whether umu-run survives the parent's SIGKILL cleanly is **[SPIKE S6]**.
+`interrupted`. [VL M1 S6: after the parent's SIGKILL, umu-run (reparented) and every marker process keep running and
+are found by marker scan.] After SIGTERM to umu-run alone, `pv-adverb` + a Wine process outlive it for up to ~3 s,
+so the Draining phase is required.
 
 ### 6.5 Threads per run
 
@@ -448,6 +453,15 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
 | S7 | `msiexec /i Z:\...` installs from a host path | Use `PROTON_VERB=getcompatpath` to convert |
 | S8 | `umu-run winetricks` works with GE-Proton (Experimental lacks `protonfixes/`) | Require GE/UMU-Proton for dependency installs; say so in UI |
 | S9 | GE tarball top-level dir equals the tag (`GE-Proton11-12`) despite `-x86_64` asset suffix | Use the actual single top-level dir name |
+
+**M1 results** (evidence: `docs/research/spike-results.md`): S1 confirmed, S2 confirmed, S3 confirmed
+(umu-run itself waited for every nested/detached/delayed child, and `wineserver -w` is kept as the authority),
+S4 confirmed (`drive_c` cwd shows `C:\...`), S5 confirmed, S6 confirmed, S7 confirmed (`Z:\` and Unix paths both
+install), S8 refuted for Experimental (no `protonfixes/`, umu crashes rc 1); GE NOT RUN, S9 refuted (top-level
+dir is `GE-Proton11-12-x86_64`, so use the archive's actual single top dir). New: exit codes propagate only when
+arg 1 is a path; bare `cmd`/`msiexec` always give 0, so section 5 must spawn built-ins as
+`C:\windows\system32\<name>.exe` (follow-up PR for section 5 / M7). Codes are 8-bit (3010 -> 194, 1641 -> 105).
+The program's own console output does not reach umu-run's pipes.
 
 Other known limits: host `/tmp` sharing is required for the host-side wineserver calls (native build
 only, no Flatpak); first use needs network for the SLR (~700 MB) and GE-Proton (~567 MB); switching a

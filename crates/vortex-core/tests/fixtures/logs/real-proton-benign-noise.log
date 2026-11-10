@@ -1,0 +1,6 @@
+2022.986:009c:00a8:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c0000142
+2022.986:0030:0034:fixme:service:scmdatabase_autostart_services Auto-start service L"winebth" failed to start: 1114
+2022.988:009c:00b0:fixme:wineusb:query_id Unhandled ID query type 0x5.
+2022.991:009c:00b0:fixme:wineusb:query_id Unhandled ID query type 0x5.
+2022.993:009c:00b0:fixme:wineusb:query_id Unhandled ID query type 0x5.
+2022.995:009c:00b0:fixme:wineusb:query_id Unhandled ID query type 0x5.

@@ -1,0 +1,51 @@
+[20:38:38.457] svc: umu-run pid=94296 marker=eff2e0ead0a6d68b167aa2f45150ea47 cwd=/tmp/claude-1000/-home-jperez-Documents-Vortex/d1f02d83-aa49-4030-8500-57c562c86cc4/scratchpad/w1/svc argv=cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\svc\setup.bat
+[20:38:56.399] svc: umu-run exited rc=0 at +17.94s; done-file present: no
+[20:38:56.400] svc: marker processes right after umu-run exit:
+[20:38:56.429] svc: wineserver -w rc=0 took 0.00s, returned at +17.97s; done-file present: no
+[20:38:56.764] svc: monitor (t = seconds since launch):
+       0.00 + pid=94296 ppid=94282 marker=yes desc_of_umu=no comm=umu-run cmd=/usr/bin/python3 /usr/bin/umu-run cmd /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1
+       0.51 + pid=94352 ppid=94296 marker=yes desc_of_umu=yes comm=pressure-vessel cmd=/home/jperez/.local/share/umu/steamrt4/pressure-vessel/bin/pressure-vessel-wrap --env-if-host=PRESSURE_VESSEL_APP_LD_LIBRARY_PATH=/opt/rocm/
+       1.01 + pid=94404 ppid=94352 marker=yes desc_of_umu=yes comm=pv-adverb cmd=/usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --
+       1.52 + pid=94428 ppid=94404 marker=yes desc_of_umu=yes comm=python3 cmd=python3 /home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/proton waitforexitandrun cmd /c Z:\tmp\claude-1000\-home-jper
+       1.52 + pid=94580 ppid=94428 marker=yes desc_of_umu=yes comm=wine cmd=/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib//wine/x86_64-unix/wine c:\windows\system32\steam.exe cmd /c
+       1.52 + pid=94598 ppid=94404 marker=yes desc_of_umu=yes comm=wineserver cmd=/home/jperez/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/../../bin/wineserver
+       1.52 + pid=94612 ppid=94404 marker=yes desc_of_umu=yes comm=wineboot.exe cmd=C:\windows\system32\wineboot.exe --init
+       1.52 + pid=94628 ppid=94404 marker=yes desc_of_umu=yes comm=services.exe cmd=C:\windows\system32\services.exe
+       1.52 + pid=94631 ppid=94404 marker=yes desc_of_umu=yes comm=winedevice.exe cmd=C:\windows\system32\winedevice.exe
+       1.52 + pid=94641 ppid=94404 marker=yes desc_of_umu=yes comm=plugplay.exe cmd=C:\windows\system32\plugplay.exe
+       2.03 + pid=94647 ppid=94404 marker=yes desc_of_umu=yes comm=svchost.exe cmd=C:\windows\system32\svchost.exe -k LocalServiceNetworkRestricted
+       2.03 + pid=94654 ppid=94404 marker=yes desc_of_umu=yes comm=winedevice.exe cmd=C:\windows\system32\winedevice.exe
+       3.04 - pid=94612 comm=wineboot.exe
+       3.55 + pid=94758 ppid=94404 marker=yes desc_of_umu=yes comm=explorer.exe cmd=C:\windows\system32\explorer.exe /desktop
+       3.55 + pid=94799 ppid=94404 marker=yes desc_of_umu=yes comm=rpcss.exe cmd=C:\windows\system32\rpcss.exe
+       3.55 + pid=94809 ppid=94404 marker=yes desc_of_umu=yes comm=tabtip.exe cmd=C:\windows\system32\tabtip.exe
+       3.55 + pid=94811 ppid=94404 marker=yes desc_of_umu=yes comm=xalia.exe cmd=\\?\Z:\home\jperez\.local\share\Steam\steamapps\common\Proton - Experimental\files\share\wine/../xalia/xalia.exe
+       3.55 + pid=94827 ppid=94404 marker=yes desc_of_umu=yes comm=cmd.exe cmd=C:\windows\system32\cmd.exe /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\svc\setup
+       3.55 + pid=94840 ppid=94404 marker=yes desc_of_umu=yes comm=conhost.exe cmd=C:\windows\system32\conhost.exe --server 0x30
+       3.55 + pid=94883 ppid=94404 marker=yes desc_of_umu=yes comm=sc cmd=sc start vtestsvc
+       4.06 + pid=94886 ppid=94404 marker=yes desc_of_umu=yes comm=cmd.exe cmd=C:\windows\system32\cmd.exe /c Z:\tmp\claude-1000\-home-jperez-Documents-Vortex\d1f02d83-aa49-4030-8500-57c562c86cc4\scratchpad\w1\svc\Redis
+       4.06 + pid=94888 ppid=94404 marker=yes desc_of_umu=yes comm=ping cmd=ping -n 15 127.0.0.1
+       4.06 + pid=94890 ppid=94404 marker=yes desc_of_umu=yes comm=conhost.exe cmd=C:\windows\system32\conhost.exe --server 0x30
+      13.71 - pid=94827 comm=cmd.exe
+      13.71 - pid=94840 comm=conhost.exe
+      13.71 - pid=94883 comm=sc
+      13.71 - pid=94886 comm=cmd.exe
+      18.29 - pid=94296 comm=umu-run
+      18.29 - pid=94352 comm=pressure-vessel
+      18.29 - pid=94404 comm=pv-adverb
+      18.29 - pid=94428 comm=python3
+      18.29 - pid=94580 comm=wine
+      18.29 - pid=94598 comm=wineserver
+      18.29 - pid=94628 comm=services.exe
+      18.29 - pid=94631 comm=winedevice.exe
+      18.29 - pid=94641 comm=plugplay.exe
+      18.29 - pid=94647 comm=svchost.exe
+      18.29 - pid=94654 comm=winedevice.exe
+      18.29 - pid=94758 comm=explorer.exe
+      18.29 - pid=94799 comm=rpcss.exe
+      18.29 - pid=94809 comm=tabtip.exe
+      18.29 - pid=94811 comm=xalia.exe
+      18.29 - pid=94888 comm=ping
+      18.29 - pid=94890 comm=conhost.exe
+      18.29 monitor end (root_alive=False, left=[])
+[20:38:56.766] svc: marker processes at end:

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.nexusdeveloper902.Vortex</id>
+  <name>Vortex</name>
+  <summary>Install and run Windows games on Linux through Proton</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.nexusdeveloper902">
+    <name>NexusDeveloper902</name>
+  </developer>
+  <description>
+    <p>
+      Vortex is a native GTK and libadwaita launcher that is being built to install and run Windows
+      games on Linux through Proton, using UMU Launcher (umu-run). Each game gets its own isolated
+      Wine prefix.
+    </p>
+    <p>
+      Vortex is in early development. It does not run games yet.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.nexusdeveloper902.Vortex.desktop</launchable>
+  <provides>
+    <binary>vortex</binary>
+  </provides>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <url type="homepage">https://github.com/Nexusdeveloper902/Vortex</url>
+  <url type="bugtracker">https://github.com/Nexusdeveloper902/Vortex/issues</url>
+  <releases/>
+</component>

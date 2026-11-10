@@ -220,6 +220,7 @@ fn unpack_checked(archive: &Path, dest: &Path, max_bytes: u64) -> Result<()> {
     let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(f));
     ar.set_preserve_permissions(false);
     let mut total = 0u64;
+    let mut seen = std::collections::HashSet::new();
     ar.set_unpack_xattrs(false);
     let bad = |p: &Path, why: &str| {
         Error::Validation(format!("unsafe backup entry {}: {why}", p.display()))
@@ -248,7 +249,16 @@ fn unpack_checked(archive: &Path, dest: &Path, max_bytes: u64) -> Result<()> {
         if named == 0 {
             continue; // the "." root entry
         }
+        if !seen.insert(cur.clone()) {
+            return Err(Error::Validation(format!(
+                "duplicate entry {} in backup",
+                path.display()
+            )));
+        }
         let ty = ent.header().entry_type();
+        if !ty.is_symlink() && fs::symlink_metadata(&cur).is_ok_and(|m| m.is_symlink()) {
+            return Err(bad(&path, "replaces a symlink"));
+        }
         if !(ty.is_file() || ty.is_dir() || ty.is_symlink()) {
             return Err(bad(&path, "unsupported entry type"));
         }
@@ -266,6 +276,10 @@ fn unpack_checked(archive: &Path, dest: &Path, max_bytes: u64) -> Result<()> {
             // no setuid/setgid/sticky; owner can always read, write (and enter dirs)
             let m = (mode & 0o777) | if ty.is_dir() { 0o700 } else { 0o600 };
             use std::os::unix::fs::PermissionsExt;
+            // never chmod through a symlink
+            if fs::symlink_metadata(&cur).is_ok_and(|m| m.is_symlink()) {
+                return Err(bad(&path, "is a symlink"));
+            }
             fs::set_permissions(&cur, fs::Permissions::from_mode(m)).map_err(Error::io(&cur))?;
         }
     }

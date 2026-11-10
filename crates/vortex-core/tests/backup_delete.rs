@@ -78,7 +78,7 @@ fn restore_needs_confirmation_to_overwrite() {
     assert!(!p.as_path().join("marker").exists());
 }
 
-fn evil_backup(db: &Db, paths: &Paths, entries: &[(&str, bool)], mode: u32) -> i64 {
+fn evil_backup(db: &Db, paths: &Paths, entries: &[(&str, bool)], mode: u32, link_to: &str) -> i64 {
     fs::create_dir_all(paths.backups_dir()).unwrap();
     let path = paths.backups_dir().join("evil.tar.gz");
     let gz = flate2::write::GzEncoder::new(
@@ -91,7 +91,10 @@ fn evil_backup(db: &Db, paths: &Paths, entries: &[(&str, bool)], mode: u32) -> i
         if *link {
             h.set_entry_type(tar::EntryType::Symlink);
             h.set_size(0);
-            h.set_link_name("/tmp").unwrap();
+            h.set_link_name(link_to).unwrap();
+        } else if name.ends_with('/') {
+            h.set_entry_type(tar::EntryType::Directory);
+            h.set_size(0);
         } else {
             h.set_size(1);
         }
@@ -100,7 +103,7 @@ fn evil_backup(db: &Db, paths: &Paths, entries: &[(&str, bool)], mode: u32) -> i
         h.as_old_mut().name[..name.len()].copy_from_slice(name.as_bytes());
         h.set_cksum();
         raw.extend_from_slice(h.as_bytes());
-        if !*link {
+        if !*link && !name.ends_with('/') {
             let mut blk = [0u8; 512];
             blk[0] = b'x';
             raw.extend_from_slice(&blk);
@@ -131,7 +134,7 @@ fn malicious_archives_are_rejected() {
         vec![("lnk", true), ("lnk/pwned", false)],
     ] {
         let (tmp, paths, db) = setup();
-        let id = evil_backup(&db, &paths, &entries, 0o644);
+        let id = evil_backup(&db, &paths, &entries, 0o644, "/tmp");
         let target = paths.managed_prefix(7).unwrap();
         let r = restore(&db, &paths, id, &target, false);
         assert!(matches!(r, Err(Error::Validation(_))), "{entries:?}: {r:?}");
@@ -352,7 +355,7 @@ fn crashed_restore_is_recovered_not_deleted() {
 #[test]
 fn hostile_modes_are_neutralised_and_size_capped() {
     let (_t, paths, db) = setup();
-    let id = evil_backup(&db, &paths, &[("f", false)], 0o4000);
+    let id = evil_backup(&db, &paths, &[("f", false)], 0o4000, "/tmp");
     let target = paths.managed_prefix(3).unwrap();
     restore(&db, &paths, id, &target, false).unwrap();
     let m = fs::metadata(target.as_path().join("f"))
@@ -426,4 +429,31 @@ fn busy_environment_is_refused() {
         plan_game_removal(&db, &paths, g),
         Err(Error::Busy(_))
     ));
+}
+
+#[test]
+fn symlink_then_same_path_entry_never_touches_outside_file() {
+    use std::os::unix::fs::PermissionsExt;
+    for second in [("x", false), ("x/", false)] {
+        let (tmp, paths, db) = setup();
+        let outside = tmp.path().join("outside.txt");
+        fs::write(&outside, "secret").unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o640)).unwrap();
+        let id = evil_backup(
+            &db,
+            &paths,
+            &[("x", true), second],
+            0o4777,
+            outside.to_str().unwrap(),
+        );
+        let target = paths.managed_prefix(5).unwrap();
+        let r = restore(&db, &paths, id, &target, false);
+        assert!(matches!(r, Err(Error::Validation(_))), "{second:?}: {r:?}");
+        assert!(!target.as_path().exists());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "secret");
+        assert_eq!(
+            fs::metadata(&outside).unwrap().permissions().mode() & 0o7777,
+            0o640
+        );
+    }
 }

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vortex
+GenericName=Windows Game Launcher
+Comment=Install and run Windows games on Linux through Proton
+Exec=vortex
+Icon=io.github.nexusdeveloper902.Vortex
+Terminal=false
+Categories=Game;
+Keywords=Proton;Wine;Windows;Games;Launcher;
+StartupNotify=true

@@ -64,12 +64,63 @@ fn load_css() {
 }
 
 pub fn run() -> glib::ExitCode {
-    let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(activate);
+    let app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        .build();
+    let slot: Slot = Rc::default();
+    {
+        let slot = slot.clone();
+        app.connect_activate(move |a| activate(a, &slot));
+    }
+    app.connect_command_line(move |a, cl| {
+        let args: Vec<String> = cl
+            .arguments()
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        a.activate();
+        match parse_launch(&args) {
+            Ok(Some(id)) => {
+                if let Some(s) = slot.borrow().clone() {
+                    game_page::open_and_play(&s, id);
+                }
+                glib::ExitCode::SUCCESS
+            }
+            Ok(None) => glib::ExitCode::SUCCESS,
+            Err(msg) => {
+                if let Some(s) = slot.borrow().clone() {
+                    s.toast(&msg);
+                }
+                glib::ExitCode::FAILURE
+            }
+        }
+    });
     app.run()
 }
 
-fn activate(app: &adw::Application) {
+type Slot = Rc<std::cell::RefCell<Option<Rc<AppState>>>>;
+
+/// Finds `--launch <id>` / `--launch=<id>` in argv (argv[0] included, ignored).
+pub fn parse_launch(args: &[String]) -> Result<Option<i64>, String> {
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        let v = if a == "--launch" {
+            it.next().map(String::as_str)
+        } else {
+            a.strip_prefix("--launch=")
+        };
+        if a == "--launch" || a.starts_with("--launch=") {
+            return v
+                .and_then(|v| v.parse::<i64>().ok())
+                .map(Some)
+                .ok_or_else(|| "--launch needs a numeric game id".to_string());
+        }
+    }
+    Ok(None)
+}
+
+fn activate(app: &adw::Application, slot: &Slot) {
     if let Some(w) = app.active_window() {
         w.present();
         return;
@@ -116,6 +167,8 @@ fn activate(app: &adw::Application) {
         toasts: toasts.clone(),
         nav: nav.clone(),
     });
+    *slot.borrow_mut() = Some(state.clone());
+    dialogs::quit_guard(&state);
     install_actions(app, &state);
     if let Err(e) = recovered {
         state.toast(&e.to_string());
@@ -304,4 +357,22 @@ fn install_actions(app: &adw::Application, state: &Rc<AppState>) {
         );
     }
     app.set_accels_for_action("win.preferences", &["<primary>comma"]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_launch;
+
+    fn v(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn launch_args() {
+        assert_eq!(parse_launch(&v(&["vortex"])), Ok(None));
+        assert_eq!(parse_launch(&v(&["vortex", "--launch", "7"])), Ok(Some(7)));
+        assert_eq!(parse_launch(&v(&["vortex", "--launch=12"])), Ok(Some(12)));
+        assert!(parse_launch(&v(&["vortex", "--launch"])).is_err());
+        assert!(parse_launch(&v(&["vortex", "--launch", "x"])).is_err());
+    }
 }

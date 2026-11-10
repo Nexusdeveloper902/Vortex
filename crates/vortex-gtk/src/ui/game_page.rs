@@ -86,6 +86,37 @@ pub fn open(state: &Rc<AppState>, id: i64) {
     }
 }
 
+/// `vortex --launch <id>`: show the game page and press Play. Unknown or not-installed ids only toast.
+pub fn open_and_play(state: &Rc<AppState>, id: i64) {
+    match state.db().get_game(id) {
+        Ok(g) if g.status == GameStatus::Installed => {}
+        Ok(g) => return state.toast(&format!("{} is not installed yet", g.name)),
+        Err(_) => return state.toast(&format!("There is no game with id {id}")),
+    }
+    state.nav.pop_to_tag("library");
+    open(state, id);
+    if let Some(p) = state.nav.visible_page()
+        && let Some(b) = find_named(p.upcast_ref(), "play-button").and_downcast::<gtk4::Button>()
+        && b.label().as_deref() == Some("Play")
+    {
+        b.emit_clicked();
+    }
+}
+
+fn find_named(w: &gtk4::Widget, name: &str) -> Option<gtk4::Widget> {
+    if w.widget_name() == name {
+        return Some(w.clone());
+    }
+    let mut c = w.first_child();
+    while let Some(x) = c {
+        if let Some(f) = find_named(&x, name) {
+            return Some(f);
+        }
+        c = x.next_sibling();
+    }
+    None
+}
+
 fn build(state: &Rc<AppState>, id: i64) -> vortex_core::error::Result<adw::NavigationPage> {
     let g = state.db().get_game(id)?;
     let env = state.db().get_environment(g.environment_id)?;
@@ -187,6 +218,7 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
         return hero;
     }
     let play = pill_button("Play", "suggested-action");
+    play.set_widget_name("play-button");
     play.set_halign(gtk4::Align::Start);
     play.set_size_request(140, -1);
     let mark = gtk4::Button::builder()

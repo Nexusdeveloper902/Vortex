@@ -346,8 +346,105 @@ pub fn detached_banner(state: &Rc<AppState>) -> adw::Banner {
     banner
 }
 
+/// "Alice, Bob and Carol" style list for the quit dialog.
+pub fn join_names(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [a] => a.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+/// Intercepts window close while runs or installs are active (keep running / stop all / cancel).
+pub fn quit_guard(state: &Rc<AppState>) {
+    let force = Rc::new(std::cell::Cell::new(false));
+    let st = state.clone();
+    state.window.connect_close_request(move |w| {
+        if force.get() {
+            return glib::Propagation::Proceed;
+        }
+        let runs = st.db().active_runs().unwrap_or_default();
+        if runs.is_empty() {
+            return glib::Propagation::Proceed;
+        }
+        let mut names: Vec<String> = Vec::new();
+        for r in &runs {
+            let db = st.db();
+            let n = match (r.game_id, r.install_id) {
+                (Some(g), _) => db.get_game(g).map(|g| g.name).ok(),
+                (None, Some(i)) => db
+                    .get_install(i)
+                    .and_then(|i| db.get_game(i.game_id))
+                    .map(|g| format!("{} (installer)", g.name))
+                    .ok(),
+                _ => None,
+            };
+            names.push(n.unwrap_or_else(|| "a program".into()));
+        }
+        names.dedup();
+        let d = adw::AlertDialog::new(
+            Some("Programs are still running"),
+            Some(&format!(
+                "{} is still running. Keep it running in the background, or stop everything and quit?",
+                join_names(&names)
+            )),
+        );
+        d.add_response("cancel", "Cancel");
+        d.add_response("keep", "Keep running in background");
+        d.add_response("stop", "Stop all and quit");
+        d.set_response_appearance("stop", adw::ResponseAppearance::Destructive);
+        d.set_default_response(Some("cancel"));
+        d.set_close_response("cancel");
+        let (st, force, w2) = (st.clone(), force.clone(), w.clone());
+        d.connect_response(None, move |_, id| match id {
+            "keep" => {
+                force.set(true);
+                w2.close();
+            }
+            "stop" => {
+                let (st, force, w2) = (st.clone(), force.clone(), w2.clone());
+                glib::spawn_future_local(async move {
+                    let (runs, installs, db) = (st.runs.clone(), st.installs.clone(), st.db.clone());
+                    let _ = blocking(move || {
+                        let active = db.lock().unwrap_or_else(|e| e.into_inner()).active_runs().unwrap_or_default();
+                        for r in &active {
+                            if let Some(i) = r.install_id {
+                                let _ = installs.cancel(i);
+                            } else if let Some(h) = runs.active(r.environment_id) {
+                                h.stop();
+                            }
+                        }
+                        for _ in 0..60 {
+                            if active.iter().all(|r| runs.active(r.environment_id).is_none()) {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                        }
+                    })
+                    .await;
+                    force.set(true);
+                    w2.close();
+                });
+            }
+            _ => {}
+        });
+        d.present(Some(w));
+        glib::Propagation::Stop
+    });
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn names_join() {
+        assert_eq!(super::join_names(&[]), "");
+        assert_eq!(super::join_names(&["A".into()]), "A");
+        assert_eq!(
+            super::join_names(&["A".into(), "B".into(), "C".into()]),
+            "A, B and C"
+        );
+    }
+
     use super::*;
     use vortex_core::delete::DeletionItem;
     use vortex_core::paths::HostPath;

@@ -68,8 +68,29 @@ pub fn parse_env_lines(lines: &[String]) -> Result<BTreeMap<String, String>, Str
     Ok(m)
 }
 
+/// Launch arguments are a JSON array of strings. Older non-JSON values fall back to word splitting.
+pub fn args_from_json(json: &str) -> Vec<String> {
+    serde_json::from_str(json)
+        .unwrap_or_else(|_| json.split_whitespace().map(str::to_owned).collect())
+}
+
+/// One argument per entry; blank entries are dropped, spaces inside an argument are kept.
+pub fn args_to_json(args: &[String]) -> String {
+    let v: Vec<&String> = args.iter().filter(|a| !a.trim().is_empty()).collect();
+    serde_json::to_string(&v).unwrap_or_else(|_| "[]".into())
+}
+
 fn env_row(list: &adw::PreferencesGroup, rows: &Rc<RefCell<Vec<adw::EntryRow>>>, text: &str) {
-    let row = adw::EntryRow::builder().title("KEY=value").build();
+    list_row(list, rows, "KEY=value", text);
+}
+
+fn list_row(
+    list: &adw::PreferencesGroup,
+    rows: &Rc<RefCell<Vec<adw::EntryRow>>>,
+    title: &str,
+    text: &str,
+) {
+    let row = adw::EntryRow::builder().title(title).build();
     row.set_text(text);
     let rm = gtk4::Button::builder()
         .icon_name("user-trash-symbolic")
@@ -162,11 +183,22 @@ pub fn open(state: &Rc<AppState>, game_id: i64) {
 
     // Launch
     let launch = adw::PreferencesGroup::builder().title("Launch").build();
-    let args = adw::EntryRow::builder()
-        .title("Arguments (separated by spaces)")
+    let arg_rows: Rc<RefCell<Vec<adw::EntryRow>>> = Rc::default();
+    let add_arg = adw::ButtonRow::builder()
+        .title("Add argument")
+        .start_icon_name("list-add-symbolic")
         .build();
-    args.set_text(&game_page::format_args(&g.launch_args));
-    launch.add(&args);
+    launch.set_description(Some(
+        "One argument per row. Spaces inside a row stay part of that argument.",
+    ));
+    launch.add(&add_arg);
+    for a in args_from_json(&g.launch_args) {
+        list_row(&launch, &arg_rows, "Argument", &a);
+    }
+    {
+        let (launch, arg_rows) = (launch.clone(), arg_rows.clone());
+        add_arg.connect_activated(move |_| list_row(&launch, &arg_rows, "Argument", ""));
+    }
     prefs.add(&launch);
     let vars = adw::PreferencesGroup::builder()
         .title("Environment variables")
@@ -215,6 +247,17 @@ pub fn open(state: &Rc<AppState>, game_id: i64) {
         );
     }
     envg.add(&deps);
+    let entry_path = state
+        .paths
+        .applications_dir()
+        .join(format!("{}.game-{game_id}.desktop", crate::app::APP_ID));
+    let desktop = adw::SwitchRow::builder()
+        .title("Add to applications menu")
+        .subtitle("Creates a launcher that starts this game directly (vortex --launch)")
+        .active(entry_path.exists())
+        .build();
+    let was_on = desktop.is_active();
+    envg.add(&desktop);
     prefs.add(&envg);
 
     // Danger zone
@@ -246,7 +289,11 @@ pub fn open(state: &Rc<AppState>, game_id: i64) {
                 Err(e) => return state.toast(&e),
             };
             apply_toggles(&mut vars, std::array::from_fn(|i| switches[i].is_active()));
-            let argv: Vec<String> = args.text().split_whitespace().map(str::to_owned).collect();
+            let argv: Vec<String> = arg_rows
+                .borrow()
+                .iter()
+                .map(|r| r.text().to_string())
+                .collect();
             let nz = |s: gtk4::glib::GString| {
                 if s.trim().is_empty() {
                     None
@@ -261,13 +308,28 @@ pub fn open(state: &Rc<AppState>, game_id: i64) {
                     name.text().trim(),
                     nz(exe.text()).as_deref(),
                     nz(wd.text()).as_deref(),
-                    &serde_json::to_string(&argv).unwrap_or_else(|_| "[]".into()),
+                    &args_to_json(&argv),
                     &serde_json::to_string(&vars).unwrap_or_else(|_| "{}".into()),
                 )?;
                 if let Some(r) = runtimes.borrow().get(combo.selected() as usize) {
                     let p = r.path.as_path().to_string_lossy().into_owned();
                     if p != old_rt {
                         db.set_environment_runtime(env.id, &p)?;
+                    }
+                }
+                drop(db);
+                if desktop.is_active() != was_on {
+                    if desktop.is_active() {
+                        let bin = std::env::current_exe()
+                            .map_err(vortex_core::error::Error::io("vortex"))?;
+                        vortex_core::desktop::write_entry(
+                            &state.paths,
+                            &bin,
+                            &game_id.to_string(),
+                            name.text().trim(),
+                        )?;
+                    } else {
+                        vortex_core::desktop::remove_entry(&state.paths, &game_id.to_string())?;
                     }
                 }
                 Ok::<_, vortex_core::error::Error>(())
@@ -303,6 +365,16 @@ mod tests {
         assert_eq!(toggles_from_env(&env), [false, true, true, false]);
         apply_toggles(&mut env, [true; 4]);
         assert!(env.is_empty());
+    }
+
+    #[test]
+    fn args_roundtrip() {
+        let a = vec!["-w".to_string(), "My Dir/x y".to_string(), " ".to_string()];
+        let json = args_to_json(&a);
+        assert_eq!(json, r#"["-w","My Dir/x y"]"#);
+        assert_eq!(args_from_json(&json), vec!["-w", "My Dir/x y"]);
+        assert_eq!(args_from_json("-a -b"), vec!["-a", "-b"]);
+        assert_eq!(args_from_json("[]"), Vec::<String>::new());
     }
 
     #[test]

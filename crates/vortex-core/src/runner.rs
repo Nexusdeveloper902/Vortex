@@ -31,6 +31,8 @@ pub enum SystemExe {
     Cmd,
     Msiexec,
     Wineboot,
+    /// Wine's `start.exe` (not a shell): `start /wait <exe>` runs a program and returns its exit code.
+    Start,
 }
 
 impl SystemExe {
@@ -39,6 +41,7 @@ impl SystemExe {
             Self::Cmd => r"C:\windows\system32\cmd.exe",
             Self::Msiexec => r"C:\windows\system32\msiexec.exe",
             Self::Wineboot => r"C:\windows\system32\wineboot.exe",
+            Self::Start => r"C:\windows\system32\start.exe",
         }
     }
 }

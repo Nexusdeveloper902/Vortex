@@ -422,13 +422,20 @@ fn uninstaller_runs_muted_outside_its_folder() {
     std::fs::create_dir_all(&c).unwrap();
     let (h, rx) = run_uninstaller(&e.runs, &e.db, &e.paths, e.env_id, &exe).unwrap();
     assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(0)));
-    // The cwd is the prefix's C:\, never the folder the uninstaller deletes.
+    // Neither umu-run's program nor the cwd is the folder the uninstaller deletes.
     let rec = std::fs::read_to_string(c.join(".fake-rec")).unwrap();
-    let dir = e.dir.as_path().display();
+    let win = format!("Z:{}\\unins000.exe", e.dir.as_path().display()).replace('/', "\\");
     assert_eq!(
         rec,
-        format!("cwd={}\narg={dir}/unins000.exe\n", c.display())
+        format!(
+            "cwd={}\narg=C:\\windows\\system32\\start.exe\narg=/wait\narg={win}\n",
+            c.display()
+        )
     );
+    // A missing uninstaller is refused before anything runs.
+    std::fs::remove_file(exe.as_path()).unwrap();
+    let r = run_uninstaller(&e.runs, &e.db, &e.paths, e.env_id, &exe).map(|_| ());
+    assert!(matches!(r, Err(Error::NotFound(_))), "{r:?}");
     let env = std::fs::read_to_string(c.join(".fake-rec.env")).unwrap();
     let overrides = env
         .lines()

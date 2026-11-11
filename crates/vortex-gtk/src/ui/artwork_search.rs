@@ -129,9 +129,7 @@ pub fn status_line(db: &vortex_core::db::Db, id: i64) -> Option<String> {
             "{n} possible match{} on Steam, none attached. Use Search Steam to choose.",
             if n == 1 { "" } else { "es" }
         )),
-        LookupState::NoMatch => {
-            Some("No match found on Steam. Use Search Steam to choose.".into())
-        }
+        LookupState::NoMatch => Some("No match found on Steam. Use Search Steam to choose.".into()),
         LookupState::Disabled => Some("Automatic artwork lookup is off for this game.".into()),
         LookupState::NotLookedUp | LookupState::HasImage => None,
     }

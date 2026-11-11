@@ -214,11 +214,13 @@ fn log_run(db: &Db, paths: &Paths, env: i64, game: Option<i64>, text: &str) -> s
             log_path: String::new(),
         })
         .unwrap();
-    db.finish_run(id, RunState::Finished, Some(0), false).unwrap();
+    db.finish_run(id, RunState::Finished, Some(0), false)
+        .unwrap();
     let mut w = LogWriter::create(paths, game, env, id, RunKind::Launch).unwrap();
     w.line(Stream::Stdout, text).unwrap();
     w.flush().unwrap();
-    db.set_run_log_path(id, &w.path().to_string_lossy()).unwrap();
+    db.set_run_log_path(id, &w.path().to_string_lossy())
+        .unwrap();
     w.path().to_path_buf()
 }
 

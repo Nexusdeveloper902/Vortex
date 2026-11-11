@@ -494,7 +494,10 @@ mod tests {
         let t = format_plan(&plan);
         assert!(t.contains("No files will be deleted"));
         assert!(t.contains("NOT delete") && t.contains("/home/u/my-wine"));
-        assert!(!t.contains("removed too") && !t.contains("deleted only if"), "{t}");
+        assert!(
+            !t.contains("removed too") && !t.contains("deleted only if"),
+            "{t}"
+        );
     }
 
     #[test]

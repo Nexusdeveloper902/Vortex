@@ -1075,10 +1075,8 @@ impl Db {
     /// Records "the user disabled lookups for this game": source `none`, no image, `opted_out`.
     pub fn set_artwork_opted_out(&self, game_id: i64) -> Result<()> {
         self.set_artwork(game_id, ArtSource::None, None, None)?;
-        self.conn.execute(
-            "UPDATE artwork SET opted_out=1 WHERE game_id=?1",
-            [game_id],
-        )?;
+        self.conn
+            .execute("UPDATE artwork SET opted_out=1 WHERE game_id=?1", [game_id])?;
         Ok(())
     }
 }

@@ -768,12 +768,17 @@ pub fn open_existing(state: &Rc<AppState>) {
             });
         });
     }
+    let skip = adw::SwitchRow::builder()
+        .title("Don't look up artwork for this game")
+        .subtitle("Its name is never sent to Steam (NDA titles)")
+        .build();
     let list = boxed();
     for w in [
         name.upcast_ref::<gtk4::Widget>(),
         exe_row.upcast_ref(),
         combo.upcast_ref(),
         prefix.upcast_ref(),
+        skip.upcast_ref(),
     ] {
         list.append(w);
     }
@@ -822,10 +827,21 @@ pub fn open_existing(state: &Rc<AppState>) {
                 Ok(r) => r,
                 Err(e) => return state.toast(&e.to_string()),
             };
-            let (state, dialog) = (state.clone(), dialog.clone());
+            let (state, dialog, skip) = (state.clone(), dialog.clone(), skip.is_active());
             glib::spawn_future_local(async move {
                 let installs = state.installs.clone();
-                match blocking(move || installs.register_existing(req)).await {
+                let db = state.db.clone();
+                let res = blocking(move || {
+                    let r = installs.register_existing(req)?;
+                    if skip {
+                        // Before the library refresh that follows can look the game up.
+                        let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                        artwork::opt_out(&db, r.game_id)?;
+                    }
+                    Ok::<_, vortex_core::error::Error>(r)
+                })
+                .await;
+                match res {
                     Some(Ok(r)) => {
                         dialog.close();
                         state.nav.pop_to_tag("library");

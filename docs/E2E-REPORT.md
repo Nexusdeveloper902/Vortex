@@ -372,3 +372,47 @@ installer and uninstaller audio (unit test per run kind, and the audio table abo
 - `tests/launch.rs` leaves two small wrapper scripts in `$TMPDIR` per run (`vortex-m10-wt-PID`,
   `vortex-m16-rec-PID`), because they live in a static that is never dropped.
 - Wine checkboxes ignore a synthetic click that has no hold between press and release.
+
+## M23 GUI walkthrough (release build, isolated XDG dirs, Hyprland)
+
+Full pass through the GUI on the real desktop (Arch, Hyprland 0.57.1, AMD), release build of
+`2734787` plus the fixes below. Proton Experimental `experimental-11.0-20261027b`, umu-launcher
+1.4.4. `XDG_DATA/CONFIG/CACHE/STATE_HOME` pointed at a throwaway dir, real `HOME`. Every
+installer page was clicked by hand (ydotool, no `LH_AUTOCLICK`). Screenshots are grim crops of the
+Vortex or Wine window only. The throwaway dir was 1.9 GiB at the end and was deleted.
+
+| Step | Result | Observed | Screenshots |
+|---|---|---|---|
+| 1 Tool check | PASS | Without umu-run on `PATH` the umu banner shows; after adding it, "Check again" hides it. The "no runtime" banner is NOT RUN: Proton Experimental in the real Steam dir is always found and `HOME` has to stay real. | [01](screenshots/walkthrough/01-missing-umu.png), [02](screenshots/walkthrough/02-check-again.png) |
+| 2 Runtimes | PASS | GE-Proton11-12 downloaded with progress into the isolated data dir and listed; Proton Experimental set as default. | [03](screenshots/walkthrough/03-runtimes.png), [04](screenshots/walkthrough/04-ge-progress.png), [05](screenshots/walkthrough/05-ge-installed.png) |
+| 3 Install wizard (folder source, new install folder, custom prefix location) | PASS | Installer detected; install folder that did not exist yet; prefix under a custom folder; every Inno-style page by hand; prereq window; select exe; Done. "Waiting for background processes" not seen (`wineserver -w` returned in 0.25 s). | [06](screenshots/walkthrough/06-wizard-installer.png) to [15](screenshots/walkthrough/15-wizard-done.png) |
+| 4 Game page and Play | PASS | Placeholder cover; game runs, data 3/3; toast "Ended (exit code 0)". | [16](screenshots/walkthrough/16-game-page.png), [17](screenshots/walkthrough/17-game-running.png), [18](screenshots/walkthrough/18-game-window.png), [19](screenshots/walkthrough/19-library-placeholder.png) |
+| 5 Artwork | PASS | Portal 2 auto cover (app 620) in grid, list and page; "Dark Souls 3 dev build" -> app 374320; Search Steam by name and by store URL; Choose image; Remove artwork; setting off = no lookup; NDA switch = `none` row, no request. Lookups run when the library refreshes (going back). | [20](screenshots/walkthrough/20-add-existing-portal2.png) to [34](screenshots/walkthrough/34-nda-no-lookup.png) |
+| 6 Failure diagnosis | PASS | `data/world.dat` hidden: game shows 2/3, exits 4, "unknown reason"; "Retry with verbose log" names `Z:\...\data\world.dat`; Proton log button and viewer. | [35](screenshots/walkthrough/35-game-missing-data.png) to [39](screenshots/walkthrough/39-proton-log.png) |
+| 7 Uninstaller and Remove completely | PASS | Uninstaller second phase (`%TEMP%\_lha451.tmp /SECONDPHASE`) tracked to exit 0, install dir gone. Plan for the custom prefix lists it under "Vortex will NOT delete", and it is kept. Plan for a managed prefix lists `prefixes/6` (312.1 MiB), which is deleted. | [40](screenshots/walkthrough/40-run-uninstaller-confirm.png) to [45](screenshots/walkthrough/45-library-after-removal.png), [56](screenshots/walkthrough/56-deletion-plan-managed.png), [57](screenshots/walkthrough/57-removed-managed.png) |
+| 8 Interrupted install and resume | PASS, with bug A (fixed below, fix not re-run live) | Vortex SIGKILLed at the Welcome page and restarted: detached banner, "Stop them", game interrupted; game page offers "Continue installation"; Retry reruns the installer to Installed. The library tile still said "Installing" after "Stop them" (bug A). | [46](screenshots/walkthrough/46-install-running-before-kill.png) to [55](screenshots/walkthrough/55-resumed-installed.png) |
+| 9 Detached / uncertain runs | PARTIAL | Detached banner and Stop/Wait dialog PASS ([47](screenshots/walkthrough/47-restart-after-kill.png), [48](screenshots/walkthrough/48-detached-dialog.png)). "Background processes are still running" / "Mark as finished" NOT RUN: the fixture's prereq always ended before the main process, so the state never occurred. | |
+
+### Bugs fixed in this PR
+
+| Commit | Bug | Test |
+|---|---|---|
+| `fix(gtk/dialogs)` | A: after "Stop them" (or when polling saw a detached install end) the library tile kept showing "Installing" while the DB said interrupted (shots 49, 50). The banner now calls back when the detached count changes and the app refreshes the library. | GTK only; not re-run live after the fix (build, clippy, tests pass) |
+| `fix(gtk/game)` | B: the "Last launch" row was computed once per page and stayed "Never" after a launch ended. It is re-read when the run finishes. | GTK only, not re-run live |
+| `fix(gtk/wizard)` | C: the exe page's flat button "The installer failed" read like a status message; now "Mark the install as failed". | label only |
+
+### Observations (not fixed)
+
+- Deletion dialog with nothing to delete and a kept custom prefix says both "No files will be
+  deleted" and "The Wine prefix of this game is removed too, unless it is listed below" (shot 44).
+- The interrupted-install dialog's Status row says "Starting" under an "Interrupted" heading (52).
+- A game whose lookup found no match (`none`) offers "Allow automatic artwork lookup", the same as an
+  NDA opt-out; the game page menu is built once and does not change after a lookup.
+- `logs/<run id>` dirs are not removed by Remove completely; run ids restart after runs are deleted,
+  so a new run can share a dir with an old one.
+- The wizard's install-folder entry shows the end of the path, so its start is cut ("/jperez/...").
+- Method: Hyprland 0.57 needs Lua dispatch (`hl.dsp.cursor.move`, `hl.dsp.focus`); XWayland
+  ignores a click without a real pointer motion first; `wtype` garbles text in Wine edits with a
+  Latin American layout, so Wine fields were filled by clipboard paste (this overwrote the desktop
+  clipboard). `~/.local/share/umu` was symlinked into the isolated `XDG_DATA_HOME` to avoid a
+  second steamrt download.

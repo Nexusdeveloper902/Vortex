@@ -51,6 +51,7 @@ File ownership (a milestone edits only its files; anything else goes to a separa
 | M13 | `packaging/**`, `data/**`, `README.md`, `docs/USER.md` |
 | M14 | `docs/E2E-REPORT.md`, fixes via small follow-up PRs |
 | M22 | `artwork.rs`, `migrations/0003_artwork_candidates.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/artwork_search.rs`; tiny edits to `db.rs`, `game_page.rs`, `install_wizard.rs` |
+| M23 | `docs/E2E-REPORT.md` (M23 section), `docs/screenshots/walkthrough/**`, small fixes in `vortex-gtk` |
 | M17 | `artwork.rs`, `migrations/0002_artwork.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/cover.rs`; small edits to `paths.rs`, `db.rs` (appended), `delete.rs` (remove cover with the game), `library.rs`, `game_page.rs`, `settings.rs`, `game_object.rs` |
 
 `db.rs`: M2 implements typed queries for the entire v1 schema. Later milestones that need another
@@ -341,6 +342,17 @@ dependency run; a **Proton log** button in Logs.
   `WINEDEBUG`) only on verbose runs, with the Proton log in the managed logs dir, redacted, and the
   missing file named (`tests/launch.rs`, `tests/install.rs`). Real Proton: `it_verbose_launch_names_the_missing_data_file`
   and `it_wizard_missing_part` (verbose retry names `setup_lantern_hollow-2.bin`).
+
+## M23: Full GUI walkthrough
+
+- Scope: one hand-driven pass through every user-facing flow on a real desktop (tool check,
+  runtimes and GE download, wizard with custom locations, Play, artwork, failure diagnosis,
+  uninstaller and deletion plans, interrupted install and resume, detached runs), isolated XDG dirs.
+  Small GUI fixes found on the way go in as separate commits.
+- Owns: `docs/E2E-REPORT.md` (M23 section), `docs/screenshots/walkthrough/**`; small fixes in
+  `vortex-gtk/src/{app.rs,ui/dialogs.rs,ui/game_page.rs,ui/install_wizard.rs}`.
+- Deps: M16, M17, M19, M21, M22.
+- Acceptance: PASS / FAIL / NOT RUN per step with screenshots in the E2E report.
 
 ## Top risks (details: ARCHITECTURE section 14)
 

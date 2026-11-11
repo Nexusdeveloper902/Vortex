@@ -162,6 +162,7 @@ impl World {
                 installer: a.candidates[0].path.clone(),
                 runtime: self.proton.clone(),
                 install_dir: None,
+                prefix: None,
             })
             .unwrap()
     }

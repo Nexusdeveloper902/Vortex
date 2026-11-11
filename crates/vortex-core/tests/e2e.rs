@@ -134,6 +134,7 @@ impl World {
                 installer: a.candidates[0].path.clone(),
                 runtime: runtime.clone(),
                 install_dir: None,
+                prefix: None,
             })
             .unwrap();
         let (evs, select_at) = drive(&s, name);
@@ -842,6 +843,7 @@ fn it_e2e_missing_installer_data() {
             installer: a.candidates[0].path.clone(),
             runtime: w.exp.clone(),
             install_dir: None,
+            prefix: None,
         })
         .unwrap();
     let (evs, _) = drive(&s, "broken");
@@ -898,6 +900,7 @@ fn e2e_child_begins_install() {
             installer: a.candidates[0].path.clone(),
             runtime: w.exp.clone(),
             install_dir: None,
+            prefix: None,
         })
         .unwrap();
     loop {

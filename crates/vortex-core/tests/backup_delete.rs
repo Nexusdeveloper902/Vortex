@@ -225,6 +225,11 @@ fn unmanaged_prefix_is_never_planned_and_shared_env_is_kept() {
     let g = db.insert_game(&NewGame::new("U", env)).unwrap();
     let plan = plan_game_removal(&db, &paths, g).unwrap();
     assert!(plan.items.is_empty());
+    let shown = fs::canonicalize(&ext).unwrap();
+    assert_eq!(
+        plan.manual.iter().map(|m| m.as_path()).collect::<Vec<_>>(),
+        [shown.as_path()]
+    );
     execute(&db, &paths, &plan).unwrap();
     assert!(ext.exists());
 

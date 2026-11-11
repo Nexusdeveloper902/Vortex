@@ -1,7 +1,8 @@
 //! Deletion plans restricted to managed paths (ARCHITECTURE section 11, rule 5).
 //!
 //! The UI shows a [`DeletionPlan`] and [`execute`] removes exactly that plan, re-validating first.
-//! Installer sources and `prefix_managed=0` prefixes never appear in a plan.
+//! Installer sources and `prefix_managed=0` prefixes never appear in a plan's items; such a
+//! prefix is listed in `manual` when its environment is removed.
 
 use crate::db::Db;
 use crate::error::{EnvId, Error, Result};
@@ -23,8 +24,8 @@ pub struct DeletionPlan {
     /// Whether the environment row is removed too.
     pub remove_env: bool,
     pub items: Vec<DeletionItem>,
-    /// Existing install dirs Vortex will not delete (outside `data/games`); shown so the user can
-    /// remove them manually.
+    /// Existing folders Vortex will not delete: install dirs outside `data/games` and the prefix of
+    /// a removed `prefix_managed = 0` environment; shown so the user can remove them manually.
     pub manual: Vec<HostPath>,
 }
 
@@ -84,6 +85,9 @@ fn build(db: &Db, paths: &Paths, env_id: EnvId, game_id: Option<i64>) -> Result<
         if let Some(c) = managed_item(p, &roots, &protect, true)? {
             items.push(c);
         }
+    } else if remove_env && let Some(c) = canon_opt(Path::new(&env.prefix_path)) {
+        // prefix_managed = 0 (adopted, or created at a custom location): never deleted, shown
+        manual.push(HostPath::new(c)?);
     }
     if let Some(gid) = game_id {
         let g = db.get_game(gid)?;

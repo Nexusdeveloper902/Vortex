@@ -50,6 +50,7 @@ File ownership (a milestone edits only its files; anything else goes to a separa
 | M12 | `vortex-gtk/src/ui/{install_wizard.rs,run_view.rs,dialogs.rs}`, edits to `game_page.rs`, `main.rs` |
 | M13 | `packaging/**`, `data/**`, `README.md`, `docs/USER.md` |
 | M14 | `docs/E2E-REPORT.md`, fixes via small follow-up PRs |
+| M17 | `artwork.rs`, `migrations/0002_artwork.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/cover.rs`; small edits to `paths.rs`, `db.rs` (appended), `delete.rs` (remove cover with the game), `library.rs`, `game_page.rs`, `settings.rs`, `game_object.rs` |
 
 `db.rs`: M2 implements typed queries for the entire v1 schema. Later milestones that need another
 query append it at the end of `db.rs` (append-only keeps merges trivial).
@@ -65,7 +66,7 @@ query append it at the end of `db.rs` (append-only keeps merges trivial).
   CI: GitHub Actions in `archlinux:latest` container (fmt, clippy -D warnings, test), plus a job
   asserting `cargo tree -p vortex-core -e normal` contains no `gtk4|glib|gio|libadwaita`.
 - Deps: none.
-- Acceptance: CI green on the PR; `cargo run --bin vortex` shows the window on Wayland (manual
+- Acceptance: CI green on the PR; `cargo run --bin vortex-launcher` shows the window on Wayland (manual
   screenshot or `WAYLAND_DISPLAY` run noted in PR); `cargo test -p vortex-core` runs without GTK libs
   (CI job on plain `rust` image for core only).
 
@@ -271,6 +272,28 @@ marked PASS / FAIL / NOT RUN with evidence.
 - A commercial DRM-free installer (e.g. a GOG offline installer the user owns) is a stretch goal,
   reported only if actually run.
 - Deps: all.
+
+## M17: Automatic game artwork
+
+- Scope: cover art from Steam's public store search + CDN (no API key), portrait with landscape
+  fallback, cached per game; "Download artwork automatically" setting (default on, off = zero
+  requests, offline mode also blocks it); background lookup for new and existing games; game page
+  Refresh artwork / Choose image / Remove artwork. Details: ARCHITECTURE section 15.
+- Deps: M11, M12.
+- Acceptance: `tests/artwork.rs` against a localhost server: match downloads portrait, portrait 404
+  falls back to header, no match records none, non-image and oversize rejected, setting off makes zero
+  requests, custom image set/remove, cover deleted with the game, v1 DB migrates. `real_steam_lookup`
+  (`--ignored`, network). Manual: covers appear in grid, list and game page.
+
+## M18: First-run tool check (sonnet)
+
+`runner::Tools::check` probes umu-run (configured path or `PATH`, no shell) and
+Proton runtimes (`runtime::discover`) and returns plain data (`ToolCheck`). The GTK shell runs it
+off the GTK thread at startup and shows banners (umu-run missing, no runtime)
+with a "Check again" button; the library stays usable. A spawn `NotFound` on umu-run displays an
+install hint instead of the raw I/O error.
+- Files: `runner.rs`, `error.rs`, `vortex-gtk/src/app.rs`, `docs/USER.md`, tests in `tests/tool_check.rs`.
+- Deps: M7, M11.
 
 ## M19: Verbose log retry (opus)
 

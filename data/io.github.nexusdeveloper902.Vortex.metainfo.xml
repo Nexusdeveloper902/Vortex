@@ -10,19 +10,17 @@
   </developer>
   <description>
     <p>
-      Vortex is a native GTK and libadwaita launcher that is being built to install and run Windows
-      games on Linux through Proton, using UMU Launcher (umu-run). Each game gets its own isolated
-      Wine prefix.
+      Vortex is a native GTK and libadwaita launcher that installs and runs Windows games on Linux
+      through Proton, using UMU Launcher (umu-run). Each game gets its own isolated Wine prefix.
     </p>
     <p>
-      Vortex is an early MVP. It has a game library, an install wizard for installer files and folders,
-      per-game configuration, backup and restore, and log viewing. Its end-to-end verification status is
-      tracked in the project repository.
+      It has a game library, an install wizard for installer files and folders, per-game
+      configuration, winetricks dependencies, backup and restore, and log viewing with diagnosis.
     </p>
   </description>
   <launchable type="desktop-id">io.github.nexusdeveloper902.Vortex.desktop</launchable>
   <provides>
-    <binary>vortex</binary>
+    <binary>vortex-launcher</binary>
   </provides>
   <categories>
     <category>Game</category>
@@ -30,5 +28,18 @@
   <content_rating type="oars-1.1"/>
   <url type="homepage">https://github.com/Nexusdeveloper902/Vortex</url>
   <url type="bugtracker">https://github.com/Nexusdeveloper902/Vortex/issues</url>
-  <releases/>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/Nexusdeveloper902/Vortex/main/docs/screenshots/01-library-e2e-games.png</image>
+      <caption>The game library</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Nexusdeveloper902/Vortex/main/docs/screenshots/03-wizard-installer.png</image>
+      <caption>The install wizard</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.3.0" date="2026-11-11"/>
+    <release version="0.2.0" date="2026-11-10"/>
+  </releases>
 </component>

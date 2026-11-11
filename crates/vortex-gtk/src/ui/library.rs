@@ -2,13 +2,15 @@
 
 use crate::app::AppState;
 use crate::game_object::{GameObject, status_label};
-use crate::ui::cover::cover;
-use gtk4::gio;
+use crate::ui::cover::{self, cover};
 use gtk4::prelude::*;
+use gtk4::{gio, glib};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::rc::Rc;
+use vortex_core::artwork;
 
 /// Sidebar sections of the library.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -74,6 +76,8 @@ pub struct Library {
     mode: Rc<Cell<Mode>>,
     filter: gtk4::CustomFilter,
     on_open: OpenCb,
+    /// Games whose artwork lookup already started this session.
+    art_tried: RefCell<HashSet<i64>>,
 }
 
 impl Library {
@@ -286,6 +290,7 @@ impl Library {
             mode,
             filter,
             on_open,
+            art_tried: RefCell::default(),
         }
     }
 
@@ -321,10 +326,50 @@ impl Library {
                             .map(|n| n.to_string_lossy().into_owned())
                     })
                     .unwrap_or_default();
-                GameObject::new(g, last, &rt)
+                let art = artwork::path(&db, &state.paths, g.id).ok().flatten();
+                GameObject::new(g, last, &rt, art.as_ref().map(|p| p.as_path()))
             })
             .collect();
+        // Not marked as tried while turned off, so switching it on works without a restart.
+        let enabled = artwork::enabled(&db).unwrap_or(false);
+        let pending: Vec<i64> = db
+            .games_without_artwork()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|_| enabled)
+            .filter(|id| self.art_tried.borrow_mut().insert(*id))
+            .collect();
+        drop(db);
         self.store.splice(0, self.store.n_items(), &items);
+        self.fetch_artwork(state, pending);
+    }
+
+    /// Background lookup for games never looked up, once per game per session (offline or a
+    /// failure just keeps the placeholder). Covers update as images arrive.
+    fn fetch_artwork(&self, state: &AppState, ids: Vec<i64>) {
+        if ids.is_empty() {
+            return;
+        }
+        let rx = artwork::spawn_auto(
+            state.db.clone(),
+            state.paths.clone(),
+            artwork::Sources::default(),
+            ids,
+        );
+        let store = self.store.clone();
+        glib::spawn_future_local(async move {
+            while let Ok(ev) = rx.recv().await {
+                let path = ev.path.into_path_buf();
+                if let Some(o) = store
+                    .iter::<GameObject>()
+                    .flatten()
+                    .find(|o| o.id() == ev.game_id)
+                {
+                    o.set_art(path.to_string_lossy().into_owned());
+                }
+                cover::update(ev.game_id, Some(path));
+            }
+        });
     }
 }
 
@@ -338,7 +383,7 @@ fn fill_tile(b: &gtk4::Box, g: &GameObject) {
     clear(b);
     b.add_css_class("game-tile");
     b.set_halign(gtk4::Align::Center);
-    b.append(&cover(&g.name(), 150, 225));
+    b.append(&cover(g.id(), &g.name(), g.art_path().as_deref(), 150, 225));
     b.append(
         &gtk4::Label::builder()
             .label(g.name())
@@ -361,7 +406,7 @@ fn fill_row(b: &gtk4::Box, g: &GameObject) {
     b.set_margin_bottom(6);
     b.set_margin_start(6);
     b.set_margin_end(6);
-    b.append(&cover(&g.name(), 40, 56));
+    b.append(&cover(g.id(), &g.name(), g.art_path().as_deref(), 40, 56));
     let col = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     col.set_hexpand(true);
     col.set_valign(gtk4::Align::Center);

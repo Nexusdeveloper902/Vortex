@@ -1,5 +1,6 @@
 //! Vortex core: all logic. Must never depend on gtk4, glib, gio or libadwaita.
 
+pub mod artwork;
 pub mod backup;
 pub mod db;
 pub mod delete;

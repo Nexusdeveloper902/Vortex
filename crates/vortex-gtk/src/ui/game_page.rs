@@ -1,8 +1,8 @@
 //! Game page: cover header with Play/Stop, secondary actions, details.
 
-use crate::app::AppState;
+use crate::app::{AppState, blocking};
 use crate::game_object::status_label;
-use crate::ui::{configure, cover::cover, dialogs, install_wizard, manage, run_view};
+use crate::ui::{configure, cover, dialogs, install_wizard, manage, run_view};
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 use libadwaita as adw;
@@ -11,10 +11,10 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 use vortex_core::db::{Game, GameStatus, RunKind};
-use vortex_core::launch;
 use vortex_core::paths::HostPath;
 use vortex_core::process::{Exit, Outcome, RunEvent, RunHandle, Runs};
 use vortex_core::winetricks;
+use vortex_core::{artwork, launch};
 
 /// `launch_args` is a JSON array of strings; shown space-joined.
 pub fn format_args(json: &str) -> String {
@@ -191,7 +191,16 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
     hero.set_margin_bottom(12);
     hero.set_margin_start(24);
     hero.set_margin_end(24);
-    hero.append(&cover(&g.name, 120, 180));
+    let art = artwork::path(&state.db(), &state.paths, g.id)
+        .ok()
+        .flatten();
+    hero.append(&cover::cover(
+        g.id,
+        &g.name,
+        art.as_ref().map(HostPath::as_path),
+        120,
+        180,
+    ));
     let col = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     col.set_valign(gtk4::Align::Center);
     col.append(
@@ -564,16 +573,115 @@ fn overflow(
     }
     group.add_action(&un);
     group.add_action(&rm);
+    for (name, f) in [
+        ("art-refresh", refresh_artwork as fn(&Rc<AppState>, i64)),
+        ("art-choose", choose_artwork),
+        ("art-remove", remove_artwork),
+    ] {
+        let a = gio::SimpleAction::new(name, None);
+        let (state, id) = (state.clone(), g.id);
+        a.connect_activate(move |_, _| f(&state, id));
+        group.add_action(&a);
+    }
+    let art = gio::Menu::new();
+    art.append(Some("Refresh artwork"), Some("game.art-refresh"));
+    art.append(Some("Choose image..."), Some("game.art-choose"));
+    art.append(Some("Remove artwork"), Some("game.art-remove"));
+    let un_menu = gio::Menu::new();
+    un_menu.append(Some("Run the game's uninstaller"), Some("game.uninstaller"));
+    un_menu.append(Some("Remove completely..."), Some("game.remove"));
     let menu = gio::Menu::new();
-    menu.append(Some("Run the game's uninstaller"), Some("game.uninstaller"));
-    menu.append(Some("Remove completely..."), Some("game.remove"));
+    menu.append_section(None, &art);
+    menu.append_section(None, &un_menu);
     let b = gtk4::MenuButton::builder()
         .icon_name("view-more-symbolic")
         .menu_model(&menu)
-        .tooltip_text("Uninstall or remove")
+        .tooltip_text("Artwork, uninstall or remove")
         .build();
     b.insert_action_group("game", Some(&group));
     b
+}
+
+/// Runs an artwork change off the GTK thread, then redraws every cover of the game.
+fn artwork_job(
+    state: &Rc<AppState>,
+    id: i64,
+    done: &'static str,
+    job: impl FnOnce(
+        &std::sync::Mutex<vortex_core::db::Db>,
+    ) -> vortex_core::error::Result<Option<HostPath>>
+    + Send
+    + 'static,
+) {
+    let state = state.clone();
+    let db = state.db.clone();
+    glib::spawn_future_local(async move {
+        match blocking(move || job(&db)).await {
+            Some(Ok(art)) => {
+                cover::update(id, art.map(HostPath::into_path_buf));
+                state.toast(done);
+            }
+            Some(Err(e)) => state.toast(&e.to_string()),
+            None => {}
+        }
+    });
+}
+
+fn refresh_artwork(state: &Rc<AppState>, id: i64) {
+    let state2 = state.clone();
+    let paths = state.paths.clone();
+    glib::spawn_future_local(async move {
+        let db = state2.db.clone();
+        let r =
+            blocking(move || artwork::fetch(&db, &paths, &artwork::Sources::default(), id, true))
+                .await;
+        match r {
+            Some(Ok(Some(p))) => {
+                cover::update(id, Some(p.into_path_buf()));
+                state2.toast("Artwork updated");
+            }
+            Some(Ok(None)) => state2.toast("No matching artwork found on Steam"),
+            Some(Err(e)) => state2.toast(&e.to_string()),
+            None => {}
+        }
+    });
+}
+
+fn choose_artwork(state: &Rc<AppState>, id: i64) {
+    let filter = gtk4::FileFilter::new();
+    filter.set_name(Some("Images (JPEG, PNG)"));
+    filter.add_mime_type("image/jpeg");
+    filter.add_mime_type("image/png");
+    let filters = gio::ListStore::new::<gtk4::FileFilter>();
+    filters.append(&filter);
+    let d = gtk4::FileDialog::builder()
+        .title("Choose cover image")
+        .filters(&filters)
+        .default_filter(&filter)
+        .build();
+    let (state, window) = (state.clone(), state.window.clone());
+    d.open(Some(&window), None::<&gio::Cancellable>, move |r| {
+        let Some(file) = r.ok().and_then(|f| f.path()) else {
+            return;
+        };
+        let file = match HostPath::new(file) {
+            Ok(f) => f,
+            Err(e) => return state.toast(&e.to_string()),
+        };
+        let paths = state.paths.clone();
+        artwork_job(&state, id, "Cover image set", move |db| {
+            let db = db.lock().unwrap_or_else(|e| e.into_inner());
+            artwork::set_custom(&db, &paths, id, &file).map(Some)
+        });
+    });
+}
+
+fn remove_artwork(state: &Rc<AppState>, id: i64) {
+    let paths = state.paths.clone();
+    artwork_job(state, id, "Artwork removed", move |db| {
+        let db = db.lock().unwrap_or_else(|e| e.into_inner());
+        artwork::remove(&db, &paths, id).map(|()| None)
+    });
 }
 
 #[cfg(test)]

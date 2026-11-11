@@ -34,7 +34,7 @@ export XDG_DATA_HOME=$VORTEX_E2E_ROOT/xdg/data XDG_CONFIG_HOME=$VORTEX_E2E_ROOT/
        XDG_CACHE_HOME=$VORTEX_E2E_ROOT/xdg/cache XDG_STATE_HOME=$VORTEX_E2E_ROOT/xdg/state
 mkdir -p "$XDG_DATA_HOME" && ln -s ~/.local/share/umu "$XDG_DATA_HOME/umu"
 export VORTEX_IT_PROTON="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental"
-export VORTEX_E2E_BIN=$PWD/target/release/vortex       # Exec= of the desktop entries
+export VORTEX_E2E_BIN=$PWD/target/release/vortex-launcher# Exec= of the desktop entries
 cargo build --release
 cargo test -p vortex-core --test e2e -- --ignored --nocapture --test-threads=1
 ```

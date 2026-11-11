@@ -310,6 +310,7 @@ fn activate(app: &adw::Application, slot: &Slot) {
     let banner = dialogs::detached_banner(&state);
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     root.append(&banner);
+    tool_banners(&state, &root, &side_list);
     split.set_vexpand(true);
     root.append(&split);
     toasts.set_child(Some(&root));
@@ -367,6 +368,59 @@ fn install_actions(app: &adw::Application, state: &Rc<AppState>) {
         );
     }
     app.set_accels_for_action("win.preferences", &["<primary>comma"]);
+}
+
+/// Startup tool check (M18): banners above the split view, re-checked by "Check again".
+/// Nothing is blocked; a missing umu-run just explains itself before the raw spawn error would.
+fn tool_banners(state: &Rc<AppState>, root: &gtk4::Box, side_list: &gtk4::ListBox) {
+    let mk = |title: &str, button: &str| {
+        let b = adw::Banner::new(title);
+        b.set_button_label(Some(button));
+        b.set_revealed(false);
+        root.append(&b);
+        b
+    };
+    let umu = mk(
+        "umu-run is required to install and run games. Arch: install umu-launcher. Debian, \
+         Ubuntu, Fedora: download it from github.com/Open-Wine-Components/umu-launcher/releases.",
+        "Check again",
+    );
+    let rt = mk(
+        "No Proton runtime found. Open Runtimes to download GE-Proton.",
+        "Open Runtimes",
+    );
+    let run = {
+        let (state, umu, rt) = (state.clone(), umu.clone(), rt.clone());
+        Rc::new(move || {
+            let (home, dir) = (state.paths.home().to_path_buf(), state.paths.runtimes_dir());
+            let (umu, rt) = (umu.clone(), rt.clone());
+            glib::spawn_future_local(async move {
+                let Some(c) = blocking(move || {
+                    let path = std::env::var_os("PATH").unwrap_or_default();
+                    Tools::default().check(&path, &home, &dir)
+                })
+                .await
+                else {
+                    return;
+                };
+                umu.set_revealed(c.umu_run.is_none());
+                rt.set_revealed(c.runtimes.is_empty());
+            });
+        })
+    };
+    {
+        let run = run.clone();
+        umu.connect_button_clicked(move |_| run());
+    }
+    {
+        let side_list = side_list.clone();
+        rt.connect_button_clicked(move |_| {
+            if let Some(r) = side_list.row_at_index(3) {
+                side_list.select_row(Some(&r));
+            }
+        });
+    }
+    run();
 }
 
 #[cfg(test)]

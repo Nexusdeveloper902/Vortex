@@ -9,7 +9,10 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_artwork.sql"),
+];
 
 pub fn now() -> i64 {
     SystemTime::now()
@@ -945,6 +948,74 @@ impl Db {
             ),
             [env, game_id],
             run_row,
+        )
+    }
+}
+
+// ---- M17 (artwork) ----
+
+str_enum!(ArtSource { Auto = "auto", Custom = "custom", None = "none" });
+str_enum!(ArtKind { Portrait = "portrait", Landscape = "landscape" });
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Artwork {
+    pub game_id: i64,
+    pub source: ArtSource,
+    pub kind: Option<ArtKind>,
+    /// Steam app id the automatic lookup matched.
+    pub steam_app: Option<i64>,
+    pub updated_at: i64,
+}
+
+impl Db {
+    pub fn get_artwork(&self, game_id: i64) -> Result<Option<Artwork>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT game_id,source,kind,steam_app,updated_at FROM artwork WHERE game_id=?1",
+                [game_id],
+                |r| {
+                    let kind: Option<String> = r.get(2)?;
+                    Ok(Artwork {
+                        game_id: r.get(0)?,
+                        source: ArtSource::parse(&r.get::<_, String>(1)?)?,
+                        kind: kind.as_deref().map(ArtKind::parse).transpose()?,
+                        steam_app: r.get(3)?,
+                        updated_at: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn set_artwork(
+        &self,
+        game_id: i64,
+        source: ArtSource,
+        kind: Option<ArtKind>,
+        steam_app: Option<i64>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO artwork(game_id,source,kind,steam_app,updated_at) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(game_id) DO UPDATE SET source=?2,kind=?3,steam_app=?4,updated_at=?5",
+            params![
+                game_id,
+                source.as_str(),
+                kind.map(ArtKind::as_str),
+                steam_app,
+                now()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Ids of games whose artwork was never looked up.
+    pub fn games_without_artwork(&self) -> Result<Vec<i64>> {
+        collect(
+            &self.conn,
+            "SELECT id FROM games WHERE id NOT IN (SELECT game_id FROM artwork) ORDER BY id",
+            [],
+            |r| r.get(0),
         )
     }
 }

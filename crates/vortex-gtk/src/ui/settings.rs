@@ -4,12 +4,12 @@ use crate::app::{AppState, blocking};
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use std::rc::Rc;
-use vortex_core::runtime;
+use vortex_core::{artwork, runtime};
 
 pub const KEY_DEFAULT_RUNTIME: &str = "default_runtime";
 pub const KEY_INSTALL_DIR: &str = "default_install_dir";
 pub const KEY_PREFIX_DIR: &str = "default_prefix_dir";
-pub const KEY_OFFLINE: &str = "offline_mode";
+pub const KEY_OFFLINE: &str = artwork::KEY_OFFLINE;
 
 fn dir_row(state: &Rc<AppState>, title: &str, key: &'static str) -> adw::EntryRow {
     let row = adw::EntryRow::builder()
@@ -83,6 +83,31 @@ pub fn present(state: &Rc<AppState>) {
         });
     }
     net.add(&offline);
+    let art = adw::SwitchRow::builder()
+        .title("Download artwork automatically")
+        .subtitle("Sends each game's name to Steam's store search for its cover")
+        .active(
+            state
+                .db()
+                .get_setting(artwork::KEY_AUTO)
+                .ok()
+                .flatten()
+                .as_deref()
+                != Some("0"),
+        )
+        .build();
+    {
+        let state = state.clone();
+        art.connect_active_notify(move |s| {
+            if let Err(e) = state
+                .db()
+                .set_setting(artwork::KEY_AUTO, if s.is_active() { "1" } else { "0" })
+            {
+                state.toast(&e.to_string());
+            }
+        });
+    }
+    net.add(&art);
     page.add(&net);
     dialog.add(&page);
 

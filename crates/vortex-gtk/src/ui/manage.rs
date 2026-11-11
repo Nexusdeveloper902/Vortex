@@ -499,6 +499,10 @@ fn log_viewer(state: &Rc<AppState>, path: &str, title: &str) {
         .await;
         buf.set_text(&match text {
             Some(Ok(t)) => t,
+            Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                "This log was removed by automatic cleanup (Vortex keeps the last 20 runs)."
+                    .to_string()
+            }
             Some(Err(e)) => format!("Could not read the log: {e}"),
             None => return,
         });

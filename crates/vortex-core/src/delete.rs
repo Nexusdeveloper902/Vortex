@@ -342,6 +342,18 @@ pub fn plan_runtime_removal(db: &Db, paths: &Paths, runtime: &Path) -> Result<Cl
             }
         }
     }
+    if db
+        .get_setting("default_runtime")?
+        .as_deref()
+        .map(Path::new)
+        .and_then(canon_opt)
+        == Some(c.clone())
+    {
+        return Err(Error::Validation(format!(
+            "{} is the default runtime. Choose another default first.",
+            runtime.display()
+        )));
+    }
     if !users.is_empty() {
         return Err(Error::Validation(format!(
             "{} is still used by: {}. Change their runtime first.",

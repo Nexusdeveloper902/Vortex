@@ -92,6 +92,13 @@ fn runtime_rules() {
     assert!(e.to_string().contains("Cool Game"), "{e}");
     assert!(rt.exists());
 
+    // default runtime: refused
+    db.set_setting("default_runtime", rt_s.to_str().unwrap())
+        .unwrap();
+    let e = plan_runtime_removal(&db, &paths, &rt).unwrap_err();
+    assert!(e.to_string().contains("default"), "{e}");
+    db.set_setting("default_runtime", "/x").unwrap();
+
     // unused: removed, symlink target untouched
     db.set_environment_runtime(env, "/other").unwrap();
     let plan = plan_runtime_removal(&db, &paths, &rt).unwrap();

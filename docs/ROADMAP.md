@@ -274,9 +274,9 @@ marked PASS / FAIL / NOT RUN with evidence.
 
 ## M18: First-run tool check (sonnet)
 
-`runner::Tools::check` probes umu-run (configured path or `PATH`, no shell), host winetricks and
+`runner::Tools::check` probes umu-run (configured path or `PATH`, no shell) and
 Proton runtimes (`runtime::discover`) and returns plain data (`ToolCheck`). The GTK shell runs it
-off the GTK thread at startup and shows banners (umu-run missing, winetricks missing, no runtime)
+off the GTK thread at startup and shows banners (umu-run missing, no runtime)
 with a "Check again" button; the library stays usable. A spawn `NotFound` on umu-run displays an
 install hint instead of the raw I/O error.
 - Files: `runner.rs`, `error.rs`, `vortex-gtk/src/app.rs`, `docs/USER.md`, tests in `tests/tool_check.rs`.

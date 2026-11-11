@@ -29,8 +29,6 @@ impl Default for Tools {
 pub struct ToolCheck {
     /// Resolved absolute `umu-run`; `None` = not found. Required for anything that runs Windows code.
     pub umu_run: Option<PathBuf>,
-    /// Host `winetricks`; only the Dependencies feature needs it.
-    pub winetricks: Option<PathBuf>,
     pub runtimes: Vec<crate::runtime::Runtime>,
 }
 
@@ -51,11 +49,10 @@ pub fn which(name: &Path, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
 }
 
 impl Tools {
-    /// Probe umu-run (the configured path), winetricks (on `path_var`) and Proton runtimes.
+    /// Probe umu-run (the configured path) and Proton runtimes.
     pub fn check(&self, path_var: &std::ffi::OsStr, home: &Path, runtimes_dir: &Path) -> ToolCheck {
         ToolCheck {
             umu_run: which(&self.umu_run, path_var),
-            winetricks: which(Path::new("winetricks"), path_var),
             runtimes: crate::runtime::discover(home, runtimes_dir),
         }
     }

@@ -385,19 +385,15 @@ fn tool_banners(state: &Rc<AppState>, root: &gtk4::Box, side_list: &gtk4::ListBo
          Ubuntu, Fedora: download it from github.com/Open-Wine-Components/umu-launcher/releases.",
         "Check again",
     );
-    let wt = mk(
-        "winetricks is not installed. Only the Dependencies feature needs it.",
-        "Check again",
-    );
     let rt = mk(
         "No Proton runtime found. Open Runtimes to download GE-Proton.",
         "Open Runtimes",
     );
     let run = {
-        let (state, umu, wt, rt) = (state.clone(), umu.clone(), wt.clone(), rt.clone());
+        let (state, umu, rt) = (state.clone(), umu.clone(), rt.clone());
         Rc::new(move || {
             let (home, dir) = (state.paths.home().to_path_buf(), state.paths.runtimes_dir());
-            let (umu, wt, rt) = (umu.clone(), wt.clone(), rt.clone());
+            let (umu, rt) = (umu.clone(), rt.clone());
             glib::spawn_future_local(async move {
                 let Some(c) = blocking(move || {
                     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -408,14 +404,13 @@ fn tool_banners(state: &Rc<AppState>, root: &gtk4::Box, side_list: &gtk4::ListBo
                     return;
                 };
                 umu.set_revealed(c.umu_run.is_none());
-                wt.set_revealed(c.winetricks.is_none());
                 rt.set_revealed(c.runtimes.is_empty());
             });
         })
     };
-    for b in [&umu, &wt] {
+    {
         let run = run.clone();
-        b.connect_button_clicked(move |_| run());
+        umu.connect_button_clicked(move |_| run());
     }
     {
         let side_list = side_list.clone();

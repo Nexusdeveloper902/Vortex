@@ -229,8 +229,8 @@ Things Vortex cannot diagnose:
 - **"umu-run is required..." banner, or "umu-run was not found".** Vortex runs every Windows program
   through UMU Launcher. On Arch install `umu-launcher`; on Debian, Ubuntu and Fedora download a
   package from https://github.com/Open-Wine-Components/umu-launcher/releases. Then press **Check again**.
-- **"winetricks is not installed".** Only **Dependencies** needs it. Install `winetricks` from your
-  distribution and press **Check again**.
+- **Dependencies refuses to run.** Vortex uses the winetricks bundled with the runtime, not the host's.
+  Use a runtime that includes it, such as GE-Proton (Proton Experimental does not).
 - **"No Proton runtime found".** Open **Runtimes** and download GE-Proton, or install Proton through
   Steam.
 - **The first install or launch in a new prefix is slow.** The first time, umu downloads the Steam Linux

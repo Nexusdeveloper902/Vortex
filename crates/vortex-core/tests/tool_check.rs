@@ -14,10 +14,8 @@ fn file(dir: &Path, name: &str, mode: u32) {
 fn finds_executables_on_path() {
     let (bin, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     file(bin.path(), "umu-run", 0o755);
-    file(bin.path(), "winetricks", 0o755);
     let c = Tools::default().check(bin.path().as_os_str(), home.path(), &home.path().join("rt"));
     assert_eq!(c.umu_run, Some(bin.path().join("umu-run")));
-    assert!(c.winetricks.is_some());
 }
 
 #[test]
@@ -25,7 +23,7 @@ fn missing_and_non_executable_are_none() {
     let (bin, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     file(bin.path(), "umu-run", 0o644);
     let c = Tools::default().check(bin.path().as_os_str(), home.path(), &home.path().join("rt"));
-    assert!(c.umu_run.is_none() && c.winetricks.is_none());
+    assert!(c.umu_run.is_none());
 }
 
 #[test]

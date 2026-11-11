@@ -86,6 +86,13 @@ nothing, then takes you to the executable step.
 Installer arguments are not supported yet. An MSI runs through `msiexec` and can show its own
 interface.
 
+### Installer arguments
+
+On the name and location step, **Advanced** has an optional **Installer arguments** field, for
+example `/S` or `/qn INSTALLDIR="C:\Games\Foo"`. Words are split on spaces, and quotes group words.
+The arguments are passed to the installer as separate arguments, never through a shell. For an MSI
+they follow `msiexec /i <file>`. They are saved with the install and used again by Retry.
+
 ## Add an existing game
 
 Use **Add an existing game** for a game that is already installed. Enter a name and choose its
@@ -147,6 +154,9 @@ that are already installed are recorded and skipped.
 - Winetricks needs a runtime that includes `protonfixes/winetricks`: GE-Proton or UMU-Proton.
 - With Proton Experimental, the dependency list shows **Not available**, and says that GE-Proton or
   UMU-Proton is required.
+- When a run fails because a well-known DLL is missing (for example `MSVCP140.dll`), the failure
+  dialog names the matching verb (`vcrun2022`) and offers **Install vcrun2022**. It uses the same
+  checked flow and needs the same runtime. DLLs without a known verb (such as `mfplat`) get no hint.
 - Only the verb `win10` has been checked against real winetricks. Larger verbs are untested.
 
 ## Runtimes
@@ -206,7 +216,8 @@ Vortex has two different removal actions. The overflow menu on the game page hol
 The game page's **Logs** lists the runs for the game: installer, game launches, run-in-environment,
 dependency installs and prefix setup. Each run shows its state (Running, Waiting for processes,
 Finished, Stopped, Interrupted) and its exit code. Open a run to read its log. **Export log** in the log
-viewer copies the file wherever you choose.
+viewer copies the file wherever you choose. Runs started without a game (**Run EXE/MSI** and
+dependency installs) appear in the Logs of every game that shares their environment.
 
 At startup Vortex keeps the newest 20 runs' logs per game and deletes older ones. Logs of running
 programs are never deleted. A pruned run stays listed, but its log is gone.
@@ -315,7 +326,7 @@ to report the problem.
 
 ## Known limitations
 
-- Installer arguments are not supported. An MSI runs interactively.
+- An MSI runs interactively unless you give installer arguments (for example `/qn`).
 - Installer candidates are looked for only in the install folder and the standard Program Files, GOG
   and Games folders inside the prefix. Use Browse for anything else.
 - Offline mode only blocks runtime and artwork downloads.

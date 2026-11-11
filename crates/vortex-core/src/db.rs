@@ -13,6 +13,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_artwork.sql"),
     include_str!("../migrations/0003_artwork_candidates.sql"),
+    include_str!("../migrations/0004_installer_args.sql"),
 ];
 
 pub fn now() -> i64 {
@@ -113,6 +114,8 @@ pub struct NewInstall {
     pub source_path: String,
     pub source_kind: SourceKind,
     pub installer_path: String,
+    /// JSON array of strings.
+    pub installer_args: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,6 +125,8 @@ pub struct Install {
     pub source_path: String,
     pub source_kind: SourceKind,
     pub installer_path: String,
+    /// JSON array of strings (argv after the installer / after `msiexec /i <file>`).
+    pub installer_args: String,
     pub state: InstallState,
     pub failure: Option<String>,
     pub started_at: i64,
@@ -432,8 +437,8 @@ impl Db {
     pub fn insert_install(&self, i: &NewInstall) -> Result<i64> {
         let t = now();
         self.conn.execute(
-            "INSERT INTO installs(game_id,source_path,source_kind,installer_path,state,started_at,updated_at) VALUES(?1,?2,?3,?4,'created',?5,?5)",
-            params![i.game_id, i.source_path, i.source_kind.as_str(), i.installer_path, t],
+            "INSERT INTO installs(game_id,source_path,source_kind,installer_path,installer_args,state,started_at,updated_at) VALUES(?1,?2,?3,?4,?6,'created',?5,?5)",
+            params![i.game_id, i.source_path, i.source_kind.as_str(), i.installer_path, t, i.installer_args],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -717,7 +722,7 @@ fn parse_start_time(stat: &str) -> Option<i64> {
 }
 
 const GAME_SELECT: &str = "SELECT id,name,environment_id,status,install_dir,install_dir_managed,exe_path,work_dir,launch_args,env_vars,created_at,updated_at FROM games";
-const INSTALL_SELECT: &str = "SELECT id,game_id,source_path,source_kind,installer_path,state,failure,started_at,updated_at FROM installs";
+const INSTALL_SELECT: &str = "SELECT id,game_id,source_path,source_kind,installer_path,state,failure,started_at,updated_at,installer_args FROM installs";
 const RUN_SELECT: &str = "SELECT id,marker,kind,environment_id,game_id,install_id,argv,pid,pid_start,state,exit_code,user_forced,findings,log_path,started_at,ended_at FROM runs";
 const BACKUP_SELECT: &str = "SELECT id,environment_id,game_name,archive_path,runtime_path,prefix_version,size_bytes,created_at FROM backups";
 
@@ -771,6 +776,7 @@ fn install_row(r: &Row) -> rusqlite::Result<Install> {
         failure: r.get(6)?,
         started_at: r.get(7)?,
         updated_at: r.get(8)?,
+        installer_args: r.get(9)?,
     })
 }
 
@@ -900,8 +906,8 @@ impl Db {
         let install_id = match install {
             Some(i) => {
                 tx.execute(
-                    "INSERT INTO installs(game_id,source_path,source_kind,installer_path,state,started_at,updated_at) VALUES(?1,?2,?3,?4,'created',?5,?5)",
-                    params![game_id, i.source_path, i.source_kind.as_str(), i.installer_path, t],
+                    "INSERT INTO installs(game_id,source_path,source_kind,installer_path,installer_args,state,started_at,updated_at) VALUES(?1,?2,?3,?4,?6,'created',?5,?5)",
+                    params![game_id, i.source_path, i.source_kind.as_str(), i.installer_path, t, i.installer_args],
                 )?;
                 Some(tx.last_insert_rowid())
             }

@@ -257,8 +257,7 @@ These flows were observed on screen and also checked in the DB, on disk or in th
 - Exit codes are 8 bits under umu, so a crash shows up as exit 5 (0xC0000005 & 0xff). A real program
   that exits 5 on purpose is also reported as a "Likely" AppCrash. Wine's crash text does not reach the log.
 - Winetricks only works on GE-Proton or UMU-Proton. Proton Experimental is refused by design.
-- The Logs page lists runs with a `game_id`. "Run EXE" and winetricks runs (no game) are in the log
-  directory but not on the page.
+- (Fixed in M26: the Logs page also lists runs without a game, `runs_for_environment`.)
 - The quit guard calls an exec run "a program", not by its exe name.
 - The dependency run view keeps its process list after the run ends.
 - The e2e suite takes about 5 minutes and downloads GE-Proton unless `VORTEX_IT_GE` is set.

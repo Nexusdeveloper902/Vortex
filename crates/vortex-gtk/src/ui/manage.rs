@@ -203,6 +203,30 @@ pub fn dependencies(state: &Rc<AppState>, env_id: i64) {
     });
 }
 
+/// "Install <verb>" from a diagnostic hint: the same validated winetricks flow as the
+/// Dependencies dialog (needs a runtime with bundled winetricks).
+pub fn install_suggested(state: &Rc<AppState>, env_id: i64, verb: &str) {
+    let Ok(env) = state.db().get_environment(env_id) else {
+        return;
+    };
+    let Ok(rt) = HostPath::new(&env.runtime_path) else {
+        return state.toast("The environment paths are invalid");
+    };
+    if let Err(e) = winetricks::require_support(&rt) {
+        return state.toast(&e.to_string());
+    }
+    let (state, verb, paths) = (state.clone(), verb.to_string(), state.paths.clone());
+    glib::spawn_future_local(async move {
+        match blocking(move || winetricks::list_verbs(&Tools::default(), &rt, &paths)).await {
+            Some(Ok(v)) => {
+                install_dependency(&state, env_id, &verb, &std::sync::Arc::new(v), false, None)
+            }
+            Some(Err(e)) => state.toast(&e.to_string()),
+            None => {}
+        }
+    });
+}
+
 /// Starts one winetricks verb and shows its run (closing `dialog` once it started). A failed
 /// run offers "Retry with verbose log".
 fn install_dependency(

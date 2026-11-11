@@ -124,6 +124,40 @@ fn missing_dll(line: &str) -> Option<&str> {
     (rest.contains("not found") && !name.is_empty()).then_some(name)
 }
 
+/// Well-known winetricks verb that provides `dll` (case-insensitive, `.dll` optional), or `None`.
+/// Verbs exist in `winetricks list-all`; `mfplat` (media codecs) has no verb.
+pub fn suggested_verb(dll: &str) -> Option<&'static str> {
+    let d = dll.to_lowercase();
+    let d = d.strip_suffix(".dll").unwrap_or(&d);
+    Some(match d {
+        "msvcp140" | "msvcp140_1" | "msvcp140_2" | "vcruntime140" | "vcruntime140_1"
+        | "concrt140" | "vcomp140" => "vcrun2022",
+        "msvcr120" | "msvcp120" => "vcrun2013",
+        "msvcr110" | "msvcp110" => "vcrun2012",
+        "msvcr100" | "msvcp100" => "vcrun2010",
+        "msvcr90" | "msvcp90" => "vcrun2008",
+        "d3dcompiler_43" => "d3dcompiler_43",
+        "d3dcompiler_47" => "d3dcompiler_47",
+        "xinput1_3" | "xinput9_1_0" => "xinput",
+        "xaudio2_7" | "x3daudio1_7" | "xactengine3_7" => "xact",
+        "physxloader" | "physxcore" => "physx",
+        "mscoree" => "dotnet48",
+        _ if d.starts_with("d3dx9_") => "d3dx9",
+        _ if d.starts_with("d3dx10_") => "d3dx10",
+        _ if d.starts_with("d3dx11_") => "d3dx11_43",
+        _ => return None,
+    })
+}
+
+/// The verb for a `MissingDependency` finding (from its evidence "missing DLL <name>: ...").
+pub fn finding_verb(f: &Finding) -> Option<&'static str> {
+    if f.class != Class::MissingDependency {
+        return None;
+    }
+    let dll = f.evidence.first()?.strip_prefix("missing DLL ")?;
+    suggested_verb(dll.split(':').next()?)
+}
+
 /// Last whitespace token of a not-found line that looks like a file name (has an extension).
 fn named_file(line: &str) -> Option<&str> {
     line.split_whitespace()
@@ -528,6 +562,26 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn dll_to_verb() {
+        assert_eq!(suggested_verb("MSVCP140.dll"), Some("vcrun2022"));
+        assert_eq!(suggested_verb("vcruntime140_1"), Some("vcrun2022"));
+        assert_eq!(suggested_verb("MSVCR120.DLL"), Some("vcrun2013"));
+        assert_eq!(suggested_verb("d3dx9_43.dll"), Some("d3dx9"));
+        assert_eq!(suggested_verb("D3DX11_43.dll"), Some("d3dx11_43"));
+        assert_eq!(suggested_verb("xinput1_3.dll"), Some("xinput"));
+        assert_eq!(suggested_verb("mfplat.dll"), None);
+        assert_eq!(suggested_verb("unknown.dll"), None);
+        let f = run(
+            RunKind::Launch,
+            BAD,
+            "synthetic-missing-dll.log",
+            Preflight::default(),
+        );
+        let d = has(&f, Class::MissingDependency).unwrap();
+        assert_eq!(finding_verb(d), Some("vcrun2022"));
     }
 
     #[test]

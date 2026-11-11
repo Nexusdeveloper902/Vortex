@@ -286,6 +286,16 @@ marked PASS / FAIL / NOT RUN with evidence.
   requests, custom image set/remove, cover deleted with the game, v1 DB migrates. `real_steam_lookup`
   (`--ignored`, network). Manual: covers appear in grid, list and game page.
 
+## M26: Diagnostics hints, Logs coverage, installer arguments
+
+- Scope: `diagnose::suggested_verb`/`finding_verb` map well-known DLLs to winetricks verbs; the
+  launch-failure dialog offers "Install <verb>" (validated winetricks flow). Logs page lists
+  game-less runs of the environment (`Db::runs_for_environment`, already covered by tests). Optional
+  installer arguments (`InstallRequest::args`, `install::split_args`, `installs.installer_args`,
+  migration 0004), appended after the exe or after `msiexec /i <file>`, reused by retry.
+- Files: `diagnose.rs`, `install.rs`, `db.rs`, `migrations/0004*`, `vortex-gtk` dialogs/manage/game_page/install_wizard, docs.
+- Acceptance: `dll_to_verb`, `split_tests`, `tests/install.rs` `msi_args_*` / `exe_args_*` (exact argv via FAKE_UMU_OUT), `runs_for_environment_includes_gameless_runs`.
+
 ## M25: Cleanup tools: backups, runtimes, logs
 
 - Scope: delete backups (Restore dialog), remove Vortex-downloaded runtimes (Runtimes page; refused when

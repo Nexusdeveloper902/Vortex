@@ -7,6 +7,8 @@ through Proton via UMU Launcher (`umu-run`), one isolated prefix per game. Spec:
 
 - `docs/ARCHITECTURE.md`: modules, path kinds, umu contract, process lifecycle, schema, security.
 - `docs/ROADMAP.md`: milestones, file ownership per milestone, parallel groups, acceptance tests.
+- `docs/RELEASING.md`: release-please flow, release PR checklist, packages and names. Read before
+  touching `release.yml`, versions, `CHANGELOG.md` or packaging, or merging a release PR.
 - `docs/research/upstream.md` (umu/Proton/winetricks facts, [VL] = verified locally) and
   `docs/research/stack.md` (crate choices). Research is input; ARCHITECTURE wins where they differ.
 

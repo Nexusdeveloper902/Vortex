@@ -158,6 +158,11 @@ fn no_match_records_none_and_is_not_retried() {
         None
     );
     assert_eq!(art(&db, id), Some((ArtSource::None, None)));
+    // a lookup without a match is not an opt-out (M28): the menu offers Search Steam
+    let st = |d: &Mutex<Db>| artwork::lookup_state(&d.lock().unwrap(), id).unwrap();
+    assert_eq!(st(&db), artwork::LookupState::NoMatch);
+    artwork::opt_out(&db.lock().unwrap(), id).unwrap();
+    assert_eq!(st(&db), artwork::LookupState::Disabled);
     assert_eq!(s.hits.load(Ordering::SeqCst), 1); // search only, no image request
     assert!(
         db.lock()
@@ -292,6 +297,10 @@ fn custom_image_set_and_remove() {
     assert!(pick.exists());
     assert_eq!(art(&db, id), Some((ArtSource::None, None)));
     assert_eq!(
+        artwork::lookup_state(&db.lock().unwrap(), id).unwrap(),
+        artwork::LookupState::Disabled
+    );
+    assert_eq!(
         artwork::path(&db.lock().unwrap(), &paths, id).unwrap(),
         None
     );
@@ -354,7 +363,7 @@ fn v1_database_migrates() {
         .unwrap();
     drop(c);
     let db = Db::open(&paths.db_file()).unwrap();
-    assert_eq!(db.user_version().unwrap(), 4);
+    assert_eq!(db.user_version().unwrap(), 5);
     assert_eq!(db.games_without_artwork().unwrap(), [id]);
     let mut bak = paths.db_file().into_os_string();
     bak.push(".bak-v1");
@@ -485,7 +494,10 @@ fn opt_out_and_installing_games_make_zero_requests() {
         None
     );
     // opt-out before the pass: the pass skips it
+    let st = |d: &Mutex<Db>| artwork::lookup_state(&d.lock().unwrap(), id).unwrap();
+    assert_eq!(st(&db), artwork::LookupState::NotLookedUp);
     artwork::opt_out(&db.lock().unwrap(), id).unwrap();
+    assert_eq!(st(&db), artwork::LookupState::Disabled);
     assert!(
         db.lock()
             .unwrap()

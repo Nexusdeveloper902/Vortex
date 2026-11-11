@@ -603,10 +603,36 @@ pub fn search_manual(db: &Mutex<Db>, src: &Sources, term: &str) -> Result<Vec<(i
     search(src, term)
 }
 
-/// Opt a game out of automatic lookups (NDA titles): records `none` unless it already has a row.
+/// What the game's artwork row means for the user (menus, M28).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LookupState {
+    /// No row: the next library pass looks it up (if lookups are on).
+    NotLookedUp,
+    /// An automatic or custom image is recorded.
+    HasImage,
+    /// Looked up automatically without attaching a match (possibly with candidates).
+    NoMatch,
+    /// The user disabled lookups for this game (NDA switch, "Don't look up", Remove artwork).
+    Disabled,
+}
+
+pub fn lookup_state(db: &Db, game_id: i64) -> Result<LookupState> {
+    Ok(match db.get_artwork(game_id)? {
+        None => LookupState::NotLookedUp,
+        Some(a) if a.source != ArtSource::None => LookupState::HasImage,
+        Some(a) if a.opted_out => LookupState::Disabled,
+        Some(_) => LookupState::NoMatch,
+    })
+}
+
+/// Opt a game out of automatic lookups (NDA titles): records `none` + opted out, unless it has an
+/// image.
 pub fn opt_out(db: &Db, game_id: i64) -> Result<()> {
-    if db.get_artwork(game_id)?.is_none() {
-        db.set_artwork(game_id, ArtSource::None, None, None)?;
+    if db
+        .get_artwork(game_id)?
+        .is_none_or(|a| a.source == ArtSource::None)
+    {
+        db.set_artwork_opted_out(game_id)?;
     }
     Ok(())
 }
@@ -684,11 +710,12 @@ pub fn set_custom(db: &Db, paths: &Paths, game_id: i64, file: &HostPath) -> Resu
     Ok(out)
 }
 
-/// Deletes the game's cached image and records `none`, so it is not fetched again automatically.
+/// Deletes the game's cached image and records `none` (opted out), so it is not fetched again
+/// automatically.
 pub fn remove(db: &Db, paths: &Paths, game_id: i64) -> Result<()> {
     db.get_game(game_id)?;
     remove_file(paths, game_id)?;
-    db.set_artwork(game_id, ArtSource::None, None, None)
+    db.set_artwork_opted_out(game_id)
 }
 
 /// Deletes only `Paths::artwork_file(game_id)` (a regular file Vortex wrote), nothing else.

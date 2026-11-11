@@ -46,8 +46,10 @@ even when automatic download is off, but not in offline mode.
 
 Titles under NDA: switch on **Don't look up artwork for this game**
 on the install wizard's first step (name and location), and the name is never sent. The game page menu has the same choice
-(**Don't look up artwork for this game** / **Allow automatic artwork lookup**). Only fully installed games
-are looked up in the background.
+(**Don't look up artwork for this game** / **Allow automatic artwork lookup**; **Remove artwork** also
+turns the lookup off for that game). A game whose lookup found nothing shows "No match found on Steam"
+(Details, Artwork) and the menu item **No match found: Search Steam...**; it is not looked up again
+automatically. Only fully installed games are looked up in the background.
 
 ## Install a game
 

@@ -234,6 +234,8 @@ pub fn resume(state: &Rc<AppState>, game_id: i64) {
     });
     w.installer_ran.set(ran.unwrap_or(false));
     w.nav.add(&w.progress_page());
+    // nothing runs until Retry; without this the status row says "Starting" (M23 shot 52)
+    w.view.set_idle();
     w.show_state(install.state, &[]);
     w.present();
 }

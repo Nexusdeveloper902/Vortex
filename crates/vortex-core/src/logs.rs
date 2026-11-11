@@ -273,6 +273,57 @@ impl LogWriter {
     }
 }
 
+/// Where Proton writes a verbose run's own log (`PROTON_LOG_DIR`): next to the run log,
+/// `<run_id>-<kind>.proton/`. Derived from `runs.log_path`, so the run row links both.
+pub fn proton_log_dir(run_log: &Path) -> PathBuf {
+    run_log.with_extension("proton")
+}
+
+/// The Proton log of a verbose run (`steam-<SteamGameId>.log`; `steam-0.log` with GAMEID 0).
+pub fn proton_log(run_log: &Path) -> Option<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(proton_log_dir(run_log))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("steam-") && n.ends_with(".log"))
+                && p.is_file()
+        })
+        .collect();
+    v.sort();
+    v.into_iter().next()
+}
+
+/// Rewrites a file Proton wrote itself (not through [`LogWriter`]) with every line passed
+/// through [`redact`], mode 0600. Streams, so a large log is never held in memory.
+pub fn redact_file(path: &Path) -> Result<()> {
+    use std::io::BufRead;
+    let tmp = path.with_extension("redacting");
+    let r = (|| {
+        let src = std::io::BufReader::new(File::open(path)?);
+        let mut out = BufWriter::new(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp)?,
+        );
+        for line in src.split(b'\n') {
+            let line = line?;
+            writeln!(out, "{}", redact(&String::from_utf8_lossy(&line)))?;
+        }
+        out.flush()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r.map_err(Error::io(path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,6 +463,29 @@ mod tests {
             x ^= x << 17;
             let _ = redact(&line);
         }
+    }
+
+    #[test]
+    fn proton_log_is_found_next_to_the_run_log_and_redacted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_log = tmp.path().join("9-launch.log");
+        let dir = proton_log_dir(&run_log);
+        assert_eq!(dir, tmp.path().join("9-launch.proton"));
+        assert!(proton_log(&run_log).is_none());
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("other.txt"), "x").unwrap();
+        let p = dir.join("steam-0.log");
+        std::fs::write(&p, "API_KEY=abc\nplain\n").unwrap();
+        assert_eq!(proton_log(&run_log).unwrap(), p);
+        redact_file(&p).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "API_KEY=<redacted>\nplain\n"
+        );
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(redact_file(&dir.join("missing.log")).is_err());
     }
 
     #[test]

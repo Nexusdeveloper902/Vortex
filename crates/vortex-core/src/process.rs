@@ -121,6 +121,9 @@ pub struct RunSpec {
     pub game_id: Option<i64>,
     pub install_id: Option<i64>,
     pub invocation: Invocation,
+    /// Verbose run: Proton writes its own log (`PROTON_LOG=1`) into
+    /// [`crate::logs::proton_log_dir`] of this run's log, redacted in place when the run ends.
+    pub verbose: bool,
 }
 
 #[derive(Default)]
@@ -277,11 +280,10 @@ impl Runs {
     /// the DB), and with preflight errors (`NotFound`, `RuntimeInvalid`, `Validation`) before
     /// anything is written.
     pub fn start(&self, spec: RunSpec) -> Result<(RunHandle, Receiver<RunEvent>)> {
-        let inv = &spec.invocation;
+        let mut inv = spec.invocation;
         inv.preflight()?;
         let wineserver = inv.wineserver()?;
         let marker = new_marker()?;
-        let mut cmd = inv.command(&self.tools, &marker)?;
 
         let mut active = lock(&self.active);
         let db = lock(&self.db);
@@ -314,13 +316,25 @@ impl Runs {
         let mut log = LogWriter::create(&self.paths, owner, run_id, spec.kind).map_err(fail)?;
         db.set_run_log_path(run_id, &log.path().to_string_lossy())
             .map_err(fail)?;
+        let verbose_dir = if spec.verbose {
+            let d = crate::logs::proton_log_dir(log.path());
+            crate::paths::create_private_dir(&d).map_err(fail)?;
+            inv.verbose_log_dir = Some(HostPath::new(&d).map_err(fail)?);
+            Some(d)
+        } else {
+            None
+        };
+        let mut cmd = inv.command(&self.tools, &marker).map_err(fail)?;
         let now = crate::db::now().to_string();
         let cwd = inv.cwd.as_path().to_string_lossy();
         let cwd_win = inv.cwd_win();
         let runtime = inv.runtime.as_path().to_string_lossy();
         let prefix = inv.prefix.as_path().to_string_lossy();
-        log.header(&[
-            ("time", &now),
+        let proton_log = verbose_dir
+            .as_ref()
+            .map(|d| d.to_string_lossy().into_owned());
+        let mut header = vec![
+            ("time", now.as_str()),
             ("kind", spec.kind.as_str()),
             ("argv", &argv_json),
             ("cwd", &cwd),
@@ -328,9 +342,13 @@ impl Runs {
             ("runtime", &runtime),
             ("prefix", &prefix),
             ("marker", &marker),
-        ])
-        .and_then(|()| log.flush())
-        .map_err(fail)?;
+        ];
+        if let Some(d) = &proton_log {
+            header.push(("proton_log_dir", d));
+        }
+        log.header(&header)
+            .and_then(|()| log.flush())
+            .map_err(fail)?;
 
         let mut child = cmd
             .spawn()
@@ -377,6 +395,7 @@ impl Runs {
             tx,
             log,
             readers,
+            verbose_dir,
         };
         thread::spawn(move || sup.run(child));
         Ok((handle, rx))
@@ -468,6 +487,7 @@ struct Supervisor {
     tx: Sender<RunEvent>,
     log: Arc<Mutex<LogWriter>>,
     readers: Vec<JoinHandle<()>>,
+    verbose_dir: Option<std::path::PathBuf>,
 }
 
 impl Supervisor {
@@ -656,6 +676,21 @@ impl Supervisor {
             Some(Exit::Low8(c)) => Some(i64::from(c)),
             _ => None,
         };
+        // Proton wrote this file itself: redact it before anyone reads it (rule 8).
+        if let Some(d) = &self.verbose_dir {
+            let logs: Vec<_> = std::fs::read_dir(d)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "log"))
+                .collect();
+            for p in logs {
+                if let Err(e) = crate::logs::redact_file(&p) {
+                    self.note(&format!("cannot redact {}: {e}", p.display()));
+                }
+            }
+        }
         self.note(&format!("finished: {o:?}"));
         self.db(|db| db.finish_run(self.h.run_id, state, code, o.user_forced));
         lock(&self.active).remove(&self.h.env_id);

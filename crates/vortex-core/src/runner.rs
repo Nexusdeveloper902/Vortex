@@ -70,7 +70,9 @@ pub struct Invocation {
     pub runtime: HostPath,
     /// Per-game variables. Reserved names are rejected (see [`validate_env`]).
     pub env: Vec<(String, String)>,
-    /// Verbose mode: `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=<dir>`.
+    /// Verbose mode: `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=<dir>` and, unless the
+    /// run's env sets it, `WINEDEBUG=`[`VERBOSE_WINEDEBUG`]. Callers leave it `None`;
+    /// `process::Runs::start` fills it in for `RunSpec { verbose: true }`.
     pub verbose_log_dir: Option<HostPath>,
     /// Disables Wine's audio drivers for this process tree only ([`MUTE_AUDIO_OVERRIDES`]
     /// appended to `WINEDLLOVERRIDES`). Set for installer and uninstaller runs, never for
@@ -81,6 +83,12 @@ pub struct Invocation {
 /// Wine DLL overrides that disable every Wine audio driver: Windows programs then see no audio
 /// device (ARCHITECTURE section 5).
 pub const MUTE_AUDIO_OVERRIDES: &str = "winepulse.drv,winealsa.drv,wineoss.drv=d";
+
+/// Wine channels of a verbose run. `warn+file` logs every failed open with the full path
+/// (`warn:file:NtCreateFile L"\\??\\Z:\\..\\data3.bin" not found (c0000034)`, [VL M19]), which
+/// `diagnose::missing_files` reads; `+seh` and `+loaddll` are the cheap half of Proton's own
+/// `PROTON_LOG` default (that default also traces every debug string and unwind, much larger).
+pub const VERBOSE_WINEDEBUG: &str = "+seh,+loaddll,warn+file";
 
 /// Names the user may not set: Vortex owns them.
 fn is_reserved(name: &str) -> bool {
@@ -261,6 +269,9 @@ impl Invocation {
             c.env("UMU_LOG", "debug")
                 .env("PROTON_LOG", "1")
                 .env("PROTON_LOG_DIR", dir.as_path());
+            if !self.env.iter().any(|(k, _)| k == "WINEDEBUG") {
+                c.env("WINEDEBUG", VERBOSE_WINEDEBUG);
+            }
         }
         Ok(c)
     }
@@ -322,7 +333,9 @@ mod tests {
             "/mnt/g/Inst dir"
         );
         assert!(env_of(&c, "PRESSURE_VESSEL_FILESYSTEMS_RW").is_none());
-        assert!(env_of(&c, "UMU_LOG").is_none());
+        for k in ["UMU_LOG", "PROTON_LOG", "PROTON_LOG_DIR", "WINEDEBUG"] {
+            assert!(env_of(&c, k).is_none(), "{k}");
+        }
         assert_eq!(env_of(&c, "PROTON_SET_GAME_DRIVE").unwrap(), "0");
         assert_eq!(
             i.exe_win().unwrap().as_str(),
@@ -348,6 +361,12 @@ mod tests {
         );
         assert_eq!(env_of(&c, "PROTON_LOG_DIR").unwrap(), "/data/logs/1");
         assert_eq!(env_of(&c, "UMU_LOG").unwrap(), "debug");
+        assert_eq!(env_of(&c, "PROTON_LOG").unwrap(), "1");
+        assert_eq!(env_of(&c, "WINEDEBUG").unwrap(), VERBOSE_WINEDEBUG);
+        // The user's own WINEDEBUG wins.
+        i.env.push(("WINEDEBUG".into(), "-all".into()));
+        let c = i.command(&Tools::default(), "m").unwrap();
+        assert_eq!(env_of(&c, "WINEDEBUG").unwrap(), "-all");
     }
 
     #[test]

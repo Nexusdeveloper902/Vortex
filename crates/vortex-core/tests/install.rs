@@ -969,7 +969,11 @@ fn kill_app_mid_install(t: &T) -> String {
             .unwrap()
             .into_iter()
             .find(|r| r.kind == RunKind::Install && r.pid.is_some());
-        if let Some(r) = run {
+        // The pid is recorded at spawn, before exec: the marker env is only visible once the
+        // fake umu-run has exec'd, so wait for a live marked process before killing the app.
+        if let Some(r) = run
+            && !scan_marker(&r.marker).is_empty()
+        {
             break r.marker;
         }
         std::thread::sleep(Duration::from_millis(50));

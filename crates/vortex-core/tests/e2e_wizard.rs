@@ -529,7 +529,7 @@ fn it_wizard_lifecycle() {
     assert_eq!(tree_hash(&src), src_hash, "the installer source changed");
 
     // ---- c. launch ----
-    let (h, rx) = launch::launch_game(&w.runs, &w.db, &w.paths, s.game_id).unwrap();
+    let (h, rx) = launch::launch_game(&w.runs, &w.db, &w.paths, s.game_id, false).unwrap();
     let (o, _) = finish(&rx);
     assert!(scan_marker(h.marker()).is_empty());
     assert_eq!(o.exit, Some(Exit::Low8(0)), "{o:?}");
@@ -611,7 +611,7 @@ fn it_wizard_lifecycle() {
         g.exe_path
     );
     assert_eq!(g.status, GameStatus::Installed);
-    let e = launch::launch_game(&w.runs, &w.db, &w.paths, s.game_id).map(|_| ());
+    let e = launch::launch_game(&w.runs, &w.db, &w.paths, s.game_id, false).map(|_| ());
     say!("d: Play after uninstall: {e:?}");
     assert!(matches!(e, Err(Error::NotFound(_))), "{e:?}");
 
@@ -692,6 +692,30 @@ fn it_wizard_missing_part() {
         "{trace:?}"
     );
     in_order(&trace, &["page installing", "error ", "exit 3"]);
+
+    // M19 (F4): "Retry with verbose log" names the missing part from Proton's own log.
+    let retry = Started {
+        events: w.inst.retry(s.install_id, true).unwrap(),
+        ..s
+    };
+    let (evs, _) = drive(&retry);
+    assert_eq!(states(&evs).last(), Some(&InstallState::Failed), "{evs:?}");
+    let named: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            InstallEvent::Finding(f) if f.class == Class::MissingInstallerData => Some(f),
+            _ => None,
+        })
+        .collect();
+    say!("e: verbose retry findings {named:?}");
+    assert!(
+        named.iter().any(|f| f.evidence[0].contains(PART2)),
+        "{named:?}"
+    );
+    assert_ne!(
+        w.db().get_game(s.game_id).unwrap().status,
+        GameStatus::Installed
+    );
     assert_eq!(tree_hash(&src), src_hash);
     w.no_wine_left();
 }

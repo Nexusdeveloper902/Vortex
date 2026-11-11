@@ -159,6 +159,7 @@ impl Env {
             game_id: None,
             install_id: None,
             invocation: inv,
+            verbose: false,
         }
     }
     fn fake(

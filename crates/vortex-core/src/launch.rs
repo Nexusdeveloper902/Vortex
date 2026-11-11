@@ -79,12 +79,14 @@ pub fn game_invocation(game: &Game, prefix: PrefixDir, runtime: HostPath) -> Res
 ///
 /// When the run ends, its whole log is classified (`diagnose`, kind launch) and the findings are
 /// stored in `runs.findings` before `Finished` is forwarded (not after a user stop), so a failed launch can be explained
-/// (spec 10/18) with [`crate::diagnose::from_json`].
+/// (spec 10/18) with [`crate::diagnose::from_json`]. `verbose` adds Proton's own log
+/// (`RunSpec::verbose`); a failed verbose launch also names the files the game could not find.
 pub fn launch_game(
     runs: &Runs,
     db: &Arc<Mutex<Db>>,
     paths: &Paths,
     game_id: i64,
+    verbose: bool,
 ) -> Result<Started> {
     let game = db
         .lock()
@@ -96,12 +98,14 @@ pub fn launch_game(
         Program::Exe(exe) => Some(exe.parent().as_ref() == Some(&invocation.cwd)),
         _ => None,
     };
+    let cwd_win = invocation.cwd_win();
     let (handle, rx) = runs.start(RunSpec {
         kind: RunKind::Launch,
         env_id: game.environment_id,
         game_id: Some(game_id),
         install_id: None,
         invocation,
+        verbose,
     })?;
     let (tx, out) = async_channel::bounded(1024);
     let (db, run_id) = (db.clone(), handle.run_id());
@@ -121,12 +125,19 @@ pub fn launch_game(
                         cwd_is_exe_dir,
                         ..Preflight::default()
                     };
-                    let f = diagnose::classify(
+                    let exit = diagnose::exit_of(o.exit);
+                    let mut f = diagnose::classify(
                         diagnose::RunKind::Launch,
-                        diagnose::exit_of(o.exit),
+                        exit,
                         &diagnose::log_lines(&String::from_utf8_lossy(&log)),
                         &pre,
                     );
+                    f.extend(diagnose::missing_files_of_run(
+                        std::path::Path::new(&run.log_path),
+                        diagnose::RunKind::Launch,
+                        exit,
+                        cwd_win.as_str(),
+                    ));
                     let _ = db.set_run_findings(run_id, &diagnose::to_json(&f));
                 }
             }
@@ -194,6 +205,7 @@ fn exec_spec(
         env_id,
         game_id: None,
         install_id: None,
+        verbose: false,
         invocation: Invocation {
             program,
             args,

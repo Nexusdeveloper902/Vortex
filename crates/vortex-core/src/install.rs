@@ -282,7 +282,7 @@ impl Installs {
         let (env_id, game_id, install_id) =
             self.create_env(&game, Some(&install), &runtime, prefix)?;
         let install_id = install_id.ok_or_else(|| Error::NotFound("install row".into()))?;
-        let events = self.spawn(install_id);
+        let events = self.spawn(install_id, false);
         Ok(Started {
             install_id,
             game_id,
@@ -292,7 +292,9 @@ impl Installs {
     }
 
     /// Re-runs the installer in the same prefix (prefix init first if it never completed).
-    pub fn retry(&self, install_id: i64) -> Result<Receiver<InstallEvent>> {
+    /// `verbose`: Proton writes its own log next to the run log (`RunSpec::verbose`), and a
+    /// failure names the files the installer could not find ([`diagnose::missing_files`]).
+    pub fn retry(&self, install_id: i64, verbose: bool) -> Result<Receiver<InstallEvent>> {
         let i = self.check(
             install_id,
             &[
@@ -307,7 +309,7 @@ impl Installs {
             return Err(Error::Busy(env));
         }
         drop(db);
-        Ok(self.spawn(install_id))
+        Ok(self.spawn(install_id, verbose))
     }
 
     /// Cancel an install running in this session: stops the current run (ARCHITECTURE 6.3).
@@ -620,7 +622,7 @@ impl Installs {
         Ok(i)
     }
 
-    fn spawn(&self, install_id: i64) -> Receiver<InstallEvent> {
+    fn spawn(&self, install_id: i64, verbose: bool) -> Receiver<InstallEvent> {
         let (tx, rx) = async_channel::bounded(1024);
         let act = Arc::new(Active::default());
         lock(&self.ctx.active).insert(install_id, act.clone());
@@ -631,6 +633,7 @@ impl Installs {
                 id: install_id,
                 act,
                 tx,
+                verbose,
             }
             .run()
         });
@@ -696,6 +699,7 @@ struct Worker {
     id: i64,
     act: Arc<Active>,
     tx: Sender<InstallEvent>,
+    verbose: bool,
 }
 
 /// Where an attempt comes to rest.
@@ -768,6 +772,7 @@ impl Worker {
             game_id: Some(game.id),
             install_id: Some(self.id),
             invocation,
+            verbose: self.verbose,
         };
         let inv = |program, args: Vec<String>, cwd: HostPath| Invocation {
             program,
@@ -831,6 +836,7 @@ impl Worker {
         let cwd = installer
             .parent()
             .ok_or_else(|| Error::InvalidPath(inst.installer_path.clone()))?;
+        let cwd_win = to_win(&prefix, &cwd);
         let is_msi = installer
             .as_path()
             .extension()
@@ -861,6 +867,17 @@ impl Worker {
             ..Preflight::default()
         };
         let mut findings = self.classify(ran.run_id, diagnose::RunKind::Install, o, pre);
+        let log = lock(&self.ctx.db).get_run(ran.run_id).map(|r| r.log_path);
+        if let Ok(log) = log
+            && let Some(f) = diagnose::missing_files_of_run(
+                Path::new(&log),
+                diagnose::RunKind::Install,
+                diagnose::exit_of(o.and_then(|o| o.exit)),
+                cwd_win.as_str(),
+            )
+        {
+            findings.push(f);
+        }
         let exited_ok = o.is_some_and(|o| o.exit.is_some_and(|x| x.matches(0)));
         if !lost && !exited_ok {
             let after = crate::source::listing(source.as_path()).unwrap_or_default();

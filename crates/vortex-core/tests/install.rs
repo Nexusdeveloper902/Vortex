@@ -388,7 +388,7 @@ fn happy_path_select_exe_then_confirm() {
         t.inst
             .confirm_exe(s.install_id, &cands[0].path, None)
             .map(drop),
-        t.inst.retry(s.install_id).map(drop),
+        t.inst.retry(s.install_id, false).map(drop),
         t.inst.mark_failed(s.install_id),
         t.inst.mark_installer_finished(s.install_id).map(drop),
         t.inst.cancel(s.install_id),
@@ -484,7 +484,7 @@ fn source_removed_mid_install_is_missing_installer_data() {
 
     // Retrying without the source fails at once, without running anything.
     let before = t.db().runs_for_game(s.game_id).unwrap().len();
-    let evs = drive(&t.inst.retry(s.install_id).unwrap(), LIMIT, |_| {});
+    let evs = drive(&t.inst.retry(s.install_id, false).unwrap(), LIMIT, |_| {});
     assert_eq!(states(&evs).last(), Some(&InstallState::Failed));
     assert!(findings(&evs).contains(&Class::MissingInstallerData));
     assert_eq!(t.db().runs_for_game(s.game_id).unwrap().len(), before);
@@ -520,7 +520,10 @@ fn cancel_mid_install_then_retry() {
     let s = t.inst.begin(t.req("Cancel Me", &src, "setup.exe")).unwrap();
     assert!(t.inst.is_active(s.install_id));
     // While active, user transitions are refused.
-    assert!(matches!(t.inst.retry(s.install_id), Err(Error::Busy(_))));
+    assert!(matches!(
+        t.inst.retry(s.install_id, false),
+        Err(Error::Busy(_))
+    ));
     let evs = drive(&s.events, LIMIT, |ev| {
         if *ev == InstallEvent::State(InstallState::Running) {
             std::thread::sleep(Duration::from_millis(200));
@@ -539,7 +542,7 @@ fn cancel_mid_install_then_retry() {
     }
 
     std::fs::write(src.as_path().join(".fake-mode"), "exit:0").unwrap();
-    let evs = drive(&t.inst.retry(s.install_id).unwrap(), LIMIT, |_| {});
+    let evs = drive(&t.inst.retry(s.install_id, false).unwrap(), LIMIT, |_| {});
     assert_eq!(
         states(&evs).last(),
         Some(&InstallState::SelectExe),
@@ -981,7 +984,7 @@ fn live_leftover_run_is_detached_until_stopped() {
     assert_eq!(install.state, InstallState::Running);
     assert!(t2.inst.check_detached(install.id).unwrap());
     // A live leftover blocks a retry in the same environment.
-    assert!(t2.inst.retry(install.id).is_err());
+    assert!(t2.inst.retry(install.id, false).is_err());
 
     assert!(t2.inst.stop_detached(install.id).unwrap().is_empty());
     assert!(scan_marker(&marker).is_empty());
@@ -1158,4 +1161,55 @@ fn it_multi_file_installer_full_state_machine() {
             r.kind, r.state, r.exit_code, r.findings
         );
     }
+}
+
+#[test]
+fn verbose_retry_names_the_file_the_installer_could_not_find() {
+    let Some(t) = fake() else { return };
+    let src = t.source("verbose src", "protonlog,exit:3");
+    let s = t.inst.begin(t.req("Verbose", &src, "setup.exe")).unwrap();
+    let missing = |evs: &[InstallEvent]| {
+        evs.iter().any(|e| {
+            matches!(e, InstallEvent::Finding(f) if f.class == Class::MissingInstallerData
+                && f.evidence[0].ends_with(r"verbose src\data3.bin"))
+        })
+    };
+    let rec = src.as_path().join(".fake-rec.env");
+    let has = |k: &str| {
+        std::fs::read_to_string(&rec)
+            .unwrap()
+            .lines()
+            .any(|l| l.starts_with(k))
+    };
+
+    // The first attempt is not verbose: no Proton log, nothing named.
+    let evs = drive(&s.events, LIMIT, |_| {});
+    assert_eq!(states(&evs).last(), Some(&InstallState::Failed));
+    assert!(!missing(&evs), "{evs:?}");
+    assert!(!has("PROTON_LOG=") && !has("UMU_LOG="));
+
+    let evs = drive(&t.inst.retry(s.install_id, true).unwrap(), LIMIT, |_| {});
+    assert_eq!(states(&evs).last(), Some(&InstallState::Failed));
+    assert!(missing(&evs), "{evs:?}");
+    assert!(has("PROTON_LOG=1") && has("UMU_LOG=debug") && has("PROTON_LOG_DIR="));
+    let run = t
+        .db()
+        .runs_for_game(s.game_id)
+        .unwrap()
+        .into_iter()
+        .find(|r| {
+            r.kind == RunKind::Install
+                && r.findings
+                    .as_deref()
+                    .is_some_and(|f| f.contains("data3.bin"))
+        })
+        .unwrap();
+    let plog = vortex_core::logs::proton_log(Path::new(&run.log_path)).unwrap();
+    assert!(plog.starts_with(t.paths.logs_dir()));
+    assert!(!std::fs::read_to_string(plog).unwrap().contains("ghp_"));
+    // Still never installed.
+    assert_ne!(
+        t.db().get_game(s.game_id).unwrap().status,
+        GameStatus::Installed
+    );
 }

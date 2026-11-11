@@ -12,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_artwork.sql"),
+    include_str!("../migrations/0003_artwork_candidates.sql"),
 ];
 
 pub fn now() -> i64 {
@@ -965,6 +966,8 @@ pub struct Artwork {
     /// Steam app id the automatic lookup matched.
     pub steam_app: Option<i64>,
     pub updated_at: i64,
+    /// Possible Steam matches found but not attached (source `none`); 0 otherwise.
+    pub candidates: i64,
 }
 
 impl Db {
@@ -972,7 +975,7 @@ impl Db {
         Ok(self
             .conn
             .query_row(
-                "SELECT game_id,source,kind,steam_app,updated_at FROM artwork WHERE game_id=?1",
+                "SELECT game_id,source,kind,steam_app,updated_at,candidates FROM artwork WHERE game_id=?1",
                 [game_id],
                 |r| {
                     let kind: Option<String> = r.get(2)?;
@@ -982,6 +985,7 @@ impl Db {
                         kind: kind.as_deref().map(ArtKind::parse).transpose()?,
                         steam_app: r.get(3)?,
                         updated_at: r.get(4)?,
+                        candidates: r.get(5)?,
                     })
                 },
             )
@@ -997,7 +1001,7 @@ impl Db {
     ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO artwork(game_id,source,kind,steam_app,updated_at) VALUES(?1,?2,?3,?4,?5)
-             ON CONFLICT(game_id) DO UPDATE SET source=?2,kind=?3,steam_app=?4,updated_at=?5",
+             ON CONFLICT(game_id) DO UPDATE SET source=?2,kind=?3,steam_app=?4,updated_at=?5,candidates=0",
             params![
                 game_id,
                 source.as_str(),
@@ -1009,14 +1013,37 @@ impl Db {
         Ok(())
     }
 
-    /// Ids of games whose artwork was never looked up.
+    /// Ids of games whose artwork was never looked up. Games still `installing` are left out, so
+    /// the wizard can record an opt-out before the first lookup can happen (M22).
     pub fn games_without_artwork(&self) -> Result<Vec<i64>> {
         collect(
             &self.conn,
-            "SELECT id FROM games WHERE id NOT IN (SELECT game_id FROM artwork) ORDER BY id",
+            "SELECT id FROM games WHERE status<>'installing'
+             AND id NOT IN (SELECT game_id FROM artwork) ORDER BY id",
             [],
             |r| r.get(0),
         )
+    }
+}
+
+// ---- M22 (artwork matching) ----
+
+impl Db {
+    /// Records "looked up, `n` possible matches, none attached": source `none`, no image.
+    pub fn set_artwork_candidates(&self, game_id: i64, n: i64) -> Result<()> {
+        self.set_artwork(game_id, ArtSource::None, None, None)?;
+        self.conn.execute(
+            "UPDATE artwork SET candidates=?2 WHERE game_id=?1",
+            params![game_id, n],
+        )?;
+        Ok(())
+    }
+
+    /// Forgets the artwork row: the game counts as never looked up again.
+    pub fn delete_artwork(&self, game_id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM artwork WHERE game_id=?1", [game_id])?;
+        Ok(())
     }
 }
 

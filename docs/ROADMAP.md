@@ -50,6 +50,7 @@ File ownership (a milestone edits only its files; anything else goes to a separa
 | M12 | `vortex-gtk/src/ui/{install_wizard.rs,run_view.rs,dialogs.rs}`, edits to `game_page.rs`, `main.rs` |
 | M13 | `packaging/**`, `data/**`, `README.md`, `docs/USER.md` |
 | M14 | `docs/E2E-REPORT.md`, fixes via small follow-up PRs |
+| M22 | `artwork.rs`, `migrations/0003_artwork_candidates.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/artwork_search.rs`; tiny edits to `db.rs`, `game_page.rs`, `install_wizard.rs` |
 | M17 | `artwork.rs`, `migrations/0002_artwork.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/cover.rs`; small edits to `paths.rs`, `db.rs` (appended), `delete.rs` (remove cover with the game), `library.rs`, `game_page.rs`, `settings.rs`, `game_object.rs` |
 
 `db.rs`: M2 implements typed queries for the entire v1 schema. Later milestones that need another
@@ -284,6 +285,19 @@ marked PASS / FAIL / NOT RUN with evidence.
   falls back to header, no match records none, non-image and oversize rejected, setting off makes zero
   requests, custom image set/remove, cover deleted with the game, v1 DB migrates. `real_steam_lookup`
   (`--ignored`, network). Manual: covers appear in grid, list and game page.
+
+## M22: Careful artwork matching and pick dialog
+
+- Scope: `clean_query` strips build/edition/platform noise from the search term; matching ignores
+  roman/arabic numeral differences and `&`/`and`; auto-attach only on a confident match, otherwise
+  record the candidate count (`artwork.candidates`) and attach nothing; extras (soundtrack, DLC,
+  demo...) never beat the base game; game page "Search Steam..." (results, store link or app id);
+  per-game opt-out (`none` row) from the install wizard and the game menu. Details: ARCHITECTURE 15.
+- Deps: M17.
+- Acceptance: unit tests (cleaning, numerals, base-game preference, app ids); `tests/artwork.rs`:
+  "Dark Souls 3 dev build" finds "DARK SOULS III" via the cleaned query, ambiguous records candidates
+  and attaches nothing, pick by app id, opt-out and installing games make zero requests;
+  `real_steam_dark_souls_3_dev_build` (`--ignored`, network) -> app 374320.
 
 ## M18: First-run tool check (sonnet)
 

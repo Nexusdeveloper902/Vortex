@@ -12,6 +12,7 @@ use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use vortex_core::artwork;
 use vortex_core::db::{InstallState, RunKind};
 use vortex_core::diagnose::Finding;
 use vortex_core::install::{
@@ -592,6 +593,13 @@ impl Wizard {
             });
         }
         col.append(&browse);
+        let skip = adw::SwitchRow::builder()
+            .title("Don't look up artwork for this game")
+            .subtitle("Its name is never sent to Steam (NDA titles)")
+            .build();
+        let skip_list = boxed();
+        skip_list.append(&skip);
+        col.append(&skip_list);
         col.append(&confirm);
         let failed = gtk4::Button::builder()
             .label("The installer failed")
@@ -616,10 +624,17 @@ impl Wizard {
                     return;
                 };
                 b.set_sensitive(false);
-                let b = b.clone();
+                let (b, skip) = (b.clone(), skip.is_active());
                 glib::spawn_future_local(async move {
                     let (installs, id) = (w.state.installs.clone(), w.install_id.get());
-                    let res = blocking(move || installs.confirm_exe(id, &exe, None)).await;
+                    let db = w.state.db.clone();
+                    let res = blocking(move || {
+                        if skip {
+                            artwork::opt_out_install(&db, id)?; // before the game can be looked up
+                        }
+                        installs.confirm_exe(id, &exe, None)
+                    })
+                    .await;
                     b.set_sensitive(true);
                     match res {
                         Some(Ok(reg)) => {

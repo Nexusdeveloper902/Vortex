@@ -1,5 +1,6 @@
 //! One file per page.
 
+pub mod artwork_search;
 pub mod configure;
 pub mod cover;
 pub mod dialogs;

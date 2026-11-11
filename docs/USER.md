@@ -26,7 +26,28 @@ Covers are downloaded automatically from Steam's public store: Vortex sends the 
 Steam's store search and, when a title matches, saves its cover image. Games without a match keep the
 coloured placeholder. Turn this off in **Preferences** (Network, **Download artwork automatically**);
 offline mode turns it off too. The game page's overflow menu has **Refresh artwork**, **Choose
-image...** (your own JPEG or PNG) and **Remove artwork**.
+image...** (your own JPEG or PNG), **Search Steam...** and **Remove artwork**.
+
+How names are looked up. Installer and build names are cleaned before anything is sent: words like
+dev build, beta, demo, press build, early access, build and version numbers (`v1.2.3`, `0.9`,
+`build 1234`, `b1234`), platform tags (`Win64`, `x64`, `PC`), installer words and bracketed
+segments that contain them are removed, and `_` `.` `-` separators become spaces. "Dark Souls 3 dev
+build" is searched as "Dark Souls 3". A plain number (a sequel, "2077") is never removed. Cover art is
+attached automatically only on a confident match: the same title after ignoring case, ™®©, `&`/`and`
+and roman/arabic numerals ("Dark Souls 3" is "DARK SOULS III"), or the first result whose title
+before a subtitle matches. Soundtracks, DLC, demos, season passes and artbooks are never preferred
+over the base game. When several results look possible but none is certain, nothing is attached and
+the game page says "N possible matches on Steam" (Details, Artwork).
+
+**Search Steam...** (game page menu) opens a search prefilled with the cleaned name. The search term
+is sent to Steam only when you press Enter or Apply. Pick a result, or paste a store link
+(`store.steampowered.com/app/<id>/...`) or a bare app id, to download that app's cover. It works
+even when automatic download is off, but not in offline mode.
+
+Titles under NDA: switch on **Don't look up artwork for this game** when confirming the executable
+in the install wizard, and the name is never sent. The game page menu has the same choice
+(**Don't look up artwork for this game** / **Allow automatic artwork lookup**). Games still being
+installed are never looked up in the background.
 
 ## Install a game
 

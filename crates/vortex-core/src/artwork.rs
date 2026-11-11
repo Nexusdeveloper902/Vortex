@@ -6,7 +6,7 @@
 //! followed, so every request stays on the configured hosts. Nothing here runs when the
 //! `artwork_auto` setting is `"0"` or offline mode is on.
 
-use crate::db::{ArtKind, ArtSource, Db};
+use crate::db::{ArtKind, ArtSource, Db, GameStatus};
 use crate::error::{Error, Result};
 use crate::paths::{HostPath, Paths};
 use async_channel::Receiver;
@@ -66,6 +66,8 @@ pub fn normalize(s: &str) -> String {
         .flat_map(|c| {
             if c.is_alphanumeric() {
                 c.to_lowercase().collect::<Vec<_>>()
+            } else if c == '&' {
+                " and ".chars().collect()
             } else {
                 vec![' ']
             }
@@ -74,30 +76,249 @@ pub fn normalize(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// `normalize` plus a dropped leading "the".
+/// Roman numeral token (I..XX, lowercase) to its arabic value.
+fn roman(t: &str) -> Option<u32> {
+    const R: [&str; 20] = [
+        "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv",
+        "xv", "xvi", "xvii", "xviii", "xix", "xx",
+    ];
+    R.iter().position(|r| *r == t).map(|i| i as u32 + 1)
+}
+
+/// `normalize` plus a dropped leading "the" and roman numerals as arabic (whole tokens, never the
+/// first one: "I Am Bread" stays a name, "Hades II" == "Hades 2").
 fn key(s: &str) -> String {
     let n = normalize(s);
-    match n.strip_prefix("the ") {
-        Some(rest) => rest.to_string(),
-        None => n,
+    let n = n.strip_prefix("the ").unwrap_or(&n);
+    n.split(' ')
+        .enumerate()
+        .map(|(i, t)| match roman(t) {
+            Some(v) if i > 0 => v.to_string(),
+            _ => t.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Store entries that are not the game itself (soundtrack, DLC, demo...), by name.
+pub fn is_extra(name: &str) -> bool {
+    let n = format!(" {} ", normalize(name));
+    [
+        "soundtrack",
+        "ost",
+        "dlc",
+        "demo",
+        "season pass",
+        "artbook",
+        "art book",
+    ]
+    .iter()
+    .any(|w| n.contains(&format!(" {w} ")))
+}
+
+/// What a search result list says about a game name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Match {
+    /// Exact (normalized, numerals equivalent) or the subtitle rule: safe to attach.
+    Confident(i64),
+    /// Results exist but none is certain: never attached automatically, the user chooses.
+    Candidates(Vec<(i64, String)>),
+    None,
+}
+
+/// Judges `(id, name)` search results for `name`. The base game is preferred: extras
+/// (soundtrack, DLC, demo, season pass, artbook) are ignored unless the query itself is one or
+/// nothing else was found. Confident = any exact match, else the first result whose title before
+/// a `:` / ` - ` subtitle matches. Everything else is only a candidate list.
+pub fn classify(name: &str, items: &[(i64, String)]) -> Match {
+    let q = key(name);
+    if q.is_empty() {
+        return Match::None;
+    }
+    let mut pool: Vec<&(i64, String)> = items.iter().collect();
+    if !is_extra(name) {
+        pool.sort_by_key(|(_, n)| is_extra(n)); // stable: base games first
+    }
+    let pool_has_base = pool.iter().any(|(_, n)| !is_extra(n));
+    if !is_extra(name) && pool_has_base {
+        pool.retain(|(_, n)| !is_extra(n));
+    }
+    if let Some((id, _)) = pool.iter().find(|(_, n)| key(n) == q) {
+        return Match::Confident(*id);
+    }
+    // The first result in the store's own order (among the kept ones).
+    if let Some((id, first)) = pool.first() {
+        let head = first.split(':').next().unwrap_or(first);
+        let head = head.split(" - ").next().unwrap_or(head);
+        if key(head) == q {
+            return Match::Confident(*id);
+        }
+    }
+    if pool.is_empty() {
+        Match::None
+    } else {
+        Match::Candidates(pool.into_iter().take(10).cloned().collect())
     }
 }
 
-/// Picks the app for `name` from `(id, name)` search results. Any exact (normalized) match wins;
-/// otherwise only the first result, and only if its title before a `:` / ` - ` subtitle matches.
-/// Anything else is no match: wrong art is worse than the placeholder.
+/// `Some(app)` only on a confident match (see [`classify`]).
 pub fn best_match(name: &str, items: &[(i64, String)]) -> Option<i64> {
-    let q = key(name);
-    if q.is_empty() {
-        return None;
+    match classify(name, items) {
+        Match::Confident(id) => Some(id),
+        _ => None,
     }
-    if let Some((id, _)) = items.iter().find(|(_, n)| key(n) == q) {
-        return Some(*id);
+}
+
+/// Words and phrases dropped from a game name before searching (lowercase).
+const NOISE_PHRASES: &[&str] = &[
+    "dev build",
+    "development build",
+    "closed beta",
+    "open beta",
+    "press build",
+    "review build",
+    "reviewer build",
+    "early access",
+    "release candidate",
+];
+const NOISE_WORDS: &[&str] = &[
+    "debug", "shipping", "beta", "alpha", "preview", "playtest", "nightly", "demo", "internal",
+    "rc", "build", "win64", "win32", "x64", "x86", "x86_64", "windows", "pc",
+];
+const INSTALLER_WORDS: &[&str] = &["setup", "installer", "install"];
+
+fn digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// A version-looking token: has a dot between digits (`0.9`, `v1.2.3`), or `v<n>`, `b<nnn>`,
+/// `r<nnn>`. A plain number (a sequel number or a year) is not.
+fn is_version(t: &str) -> bool {
+    let body = t.strip_prefix('v').unwrap_or(t);
+    if body.contains('.') {
+        return body.split('.').all(digits);
     }
-    let (id, first) = items.first()?;
-    let head = first.split(':').next().unwrap_or(first);
-    let head = head.split(" - ").next().unwrap_or(head);
-    (key(head) == q).then_some(*id)
+    match t.as_bytes().first() {
+        Some(b'v') => digits(&t[1..]),
+        Some(b'b' | b'r') => digits(&t[1..]) && t.len() > 3,
+        _ => false,
+    }
+}
+
+fn token_is_noise(t: &str) -> bool {
+    NOISE_WORDS.contains(&t) || INSTALLER_WORDS.contains(&t) || is_version(t)
+}
+
+/// The Steam search term for a game name: build, edition and platform noise removed as whole
+/// words, separators collapsed. The first word is never dropped except installer words, and a
+/// plain number is never dropped ("Dark Souls 3", "2077"). May be empty.
+pub fn clean_query(name: &str) -> String {
+    // Brackets: dropped with their content when the content holds noise, else just unwrapped.
+    let mut flat = String::new();
+    let mut inner = String::new();
+    let mut depth = 0;
+    for c in name.chars() {
+        match c {
+            '(' | '[' | '{' if depth == 0 => depth = 1,
+            ')' | ']' | '}' if depth == 1 => {
+                depth = 0;
+                let low = inner.to_lowercase();
+                let words: Vec<&str> = low
+                    .split(|c: char| c == '_' || c == ',' || c.is_whitespace())
+                    .filter(|w| !w.is_empty())
+                    .collect();
+                if !words.iter().any(|w| token_is_noise(w)) {
+                    flat.push(' ');
+                    flat.push_str(&inner);
+                    flat.push(' ');
+                }
+                inner.clear();
+            }
+            _ if depth == 1 => inner.push(c),
+            _ => flat.push(c),
+        }
+    }
+    flat.push_str(&inner); // unclosed bracket: keep the text
+    // `_` is a separator; a dot is one unless it sits between digits (versions).
+    let chars: Vec<char> = flat.chars().collect();
+    let flat: String = chars
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| match c {
+            '_' => ' ',
+            '.' if !(i > 0
+                && chars[i - 1].is_ascii_digit()
+                && chars.get(i + 1).is_some_and(|n| n.is_ascii_digit())) =>
+            {
+                ' '
+            }
+            c => c,
+        })
+        .collect();
+    let toks: Vec<&str> = flat.split_whitespace().collect();
+    let low: Vec<String> = toks.iter().map(|t| t.to_lowercase()).collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    'outer: while i < toks.len() {
+        for ph in NOISE_PHRASES {
+            let n = ph.split(' ').count();
+            if i > 0 && i + n <= toks.len() && low[i..i + n].join(" ") == *ph {
+                i += n;
+                continue 'outer;
+            }
+        }
+        let t = &low[i];
+        // "version 1.2", "build 1234": the word and the number after it.
+        if i > 0 && (t == "version" || t == "build") {
+            let next = low.get(i + 1).map(String::as_str).unwrap_or("");
+            if t == "build" || is_version(next) || digits(next) {
+                i += 1 + usize::from(is_version(next) || digits(next));
+                continue;
+            }
+        }
+        // Hyphen-joined noise ("Game-Beta", "Foo-x64"): drop noise parts, keep real hyphens.
+        let parts: Vec<&str> = toks[i].split('-').collect();
+        let kept: Vec<&str> = parts
+            .iter()
+            .enumerate()
+            .filter(|(j, p)| {
+                let lp = p.to_lowercase();
+                let noise = if i == 0 && *j == 0 {
+                    INSTALLER_WORDS.contains(&lp.as_str())
+                } else {
+                    token_is_noise(&lp)
+                };
+                !p.is_empty() && !noise
+            })
+            .map(|(_, p)| *p)
+            .collect();
+        if !kept.is_empty() {
+            out.push(kept.join("-"));
+        } else if parts.iter().all(|p| p.is_empty()) {
+            out.push("-".into()); // a lone dash: keep as separator for now
+        }
+        i += 1;
+    }
+    while out.first().is_some_and(|t| t == "-") {
+        out.remove(0);
+    }
+    while out.last().is_some_and(|t| t == "-") {
+        out.pop();
+    }
+    out.dedup_by(|a, b| a == "-" && b == "-");
+    out.join(" ")
+}
+
+/// A Steam app id from a pasted store URL (`store.steampowered.com/app/<id>/...`) or a bare id.
+pub fn parse_app_id(input: &str) -> Option<i64> {
+    let t = input.trim();
+    let id = if digits(t) {
+        t
+    } else {
+        let rest = t.split("store.steampowered.com/app/").nth(1)?;
+        rest.split(|c: char| !c.is_ascii_digit()).next()?
+    };
+    id.parse().ok().filter(|n| *n > 0)
 }
 
 /// `(id, name)` of the `app` items in a store search response.
@@ -174,17 +395,31 @@ fn get(url: &str, limit: u64, image: bool) -> Result<Vec<u8>> {
     Ok(body)
 }
 
-/// Looks `name` up and downloads the best cover: portrait 2x, portrait, then the landscape
-/// header. `Ok(None)` = no matching app, or the app has none of these images.
-pub fn find(src: &Sources, name: &str) -> Result<Option<Image>> {
-    if key(name).is_empty() {
-        return Ok(None);
-    }
-    let url = format!("{}?term={}&l=english&cc=US", src.search, encode(name));
-    let items = parse_search(&get(&url, MAX_JSON, false)?)?;
-    let Some(app) = best_match(name, &items) else {
-        return Ok(None);
-    };
+/// Result of looking a name up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lookup {
+    /// A confident match and its downloaded cover.
+    Found(Image),
+    /// Nothing usable (no results, or the matched app has no art).
+    NoMatch,
+    /// This many possible matches, none certain: not attached.
+    Ambiguous(usize),
+}
+
+fn search_url(src: &Sources, term: &str) -> String {
+    format!("{}?term={}&l=english&cc=US", src.search, encode(term))
+}
+
+/// `(id, name)` results of a store search for `term`, base games before extras.
+pub fn search(src: &Sources, term: &str) -> Result<Vec<(i64, String)>> {
+    let mut items = parse_search(&get(&search_url(src, term), MAX_JSON, false)?)?;
+    items.sort_by_key(|(_, n)| is_extra(n));
+    Ok(items)
+}
+
+/// Downloads the best cover of Steam app `app`: portrait 2x, portrait, then the landscape
+/// header. `Ok(None)` = the app has none of these images.
+pub fn download(src: &Sources, app: i64) -> Result<Option<Image>> {
     let mut last = None;
     for (file, kind) in [
         ("library_600x900_2x.jpg", ArtKind::Portrait),
@@ -205,6 +440,27 @@ pub fn find(src: &Sources, name: &str) -> Result<Option<Image>> {
     }
     // All 404: the app has no art. Anything else may be transient: report, record nothing.
     last.map_or(Ok(None), Err)
+}
+
+/// Looks the game up by its [`clean_query`] term and downloads the cover on a confident match.
+pub fn lookup(src: &Sources, name: &str) -> Result<Lookup> {
+    let term = clean_query(name);
+    if key(&term).is_empty() {
+        return Ok(Lookup::NoMatch);
+    }
+    Ok(match classify(&term, &search(src, &term)?) {
+        Match::Confident(app) => download(src, app)?.map_or(Lookup::NoMatch, Lookup::Found),
+        Match::Candidates(c) => Lookup::Ambiguous(c.len()),
+        Match::None => Lookup::NoMatch,
+    })
+}
+
+/// [`lookup`], keeping only a confident match with art.
+pub fn find(src: &Sources, name: &str) -> Result<Option<Image>> {
+    Ok(match lookup(src, name)? {
+        Lookup::Found(i) => Some(i),
+        _ => None,
+    })
 }
 
 /// Whether automatic lookups may make requests.
@@ -274,16 +530,20 @@ pub fn fetch(
         if !force && db.get_artwork(game_id)?.is_some() {
             return Ok(None);
         }
-        db.get_game(game_id)?.name
+        let g = db.get_game(game_id)?;
+        if !force && g.status == GameStatus::Installing {
+            return Ok(None); // the add-time opt-out may still be coming
+        }
+        g.name
     };
-    let found = find(src, &name)?;
+    let found = lookup(src, &name)?;
     let db = lock(db);
     let current = db.get_artwork(game_id)?;
     if !force && current.is_some() {
         return Ok(None);
     }
     match found {
-        Some(img) => {
+        Lookup::Found(img) => {
             let p = write(paths, game_id, &img.bytes)?;
             db.set_artwork(
                 game_id,
@@ -293,13 +553,80 @@ pub fn fetch(
             )?;
             Ok(Some(p))
         }
-        None => {
+        Lookup::NoMatch => {
             if current.is_none() {
                 db.set_artwork(game_id, ArtSource::None, None, None)?;
             }
             Ok(None)
         }
+        Lookup::Ambiguous(n) => {
+            if current.is_none() {
+                db.set_artwork_candidates(game_id, n as i64)?;
+            }
+            Ok(None)
+        }
     }
+}
+
+/// Manual pick ("Search Steam..."): downloads app `app`'s art and records it as the game's cover
+/// (source `auto`, `steam_app` = the choice). Works when only the automatic switch is off (the
+/// user asked for it), but not in offline mode. Replaces any current image.
+pub fn pick(
+    db: &Mutex<Db>,
+    paths: &Paths,
+    src: &Sources,
+    game_id: i64,
+    app: i64,
+) -> Result<HostPath> {
+    ensure_manual(&lock(db))?;
+    let img = download(src, app)?
+        .ok_or_else(|| Error::Validation(format!("Steam app {app} has no cover art")))?;
+    let db = lock(db);
+    let p = write(paths, game_id, &img.bytes)?;
+    db.set_artwork(game_id, ArtSource::Auto, Some(img.kind), Some(app))?;
+    Ok(p)
+}
+
+/// A manual search is allowed unless offline mode is on.
+pub fn ensure_manual(db: &Db) -> Result<()> {
+    if db.get_setting(KEY_OFFLINE)?.as_deref() == Some("1") {
+        return Err(Error::Validation(
+            "Offline mode is on: nothing is downloaded".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Manual store search for the pick dialog (same checks as [`pick`]).
+pub fn search_manual(db: &Mutex<Db>, src: &Sources, term: &str) -> Result<Vec<(i64, String)>> {
+    ensure_manual(&lock(db))?;
+    search(src, term)
+}
+
+/// Opt a game out of automatic lookups (NDA titles): records `none` unless it already has a row.
+pub fn opt_out(db: &Db, game_id: i64) -> Result<()> {
+    if db.get_artwork(game_id)?.is_none() {
+        db.set_artwork(game_id, ArtSource::None, None, None)?;
+    }
+    Ok(())
+}
+
+/// [`opt_out`] for the game of an install (the wizard, before the game is confirmed).
+pub fn opt_out_install(db: &Mutex<Db>, install_id: i64) -> Result<()> {
+    let db = lock(db);
+    let game = db.get_install(install_id)?.game_id;
+    opt_out(&db, game)
+}
+
+/// Allow automatic lookups again for a game that has no image: the next library pass queries it.
+pub fn allow_auto(db: &Db, game_id: i64) -> Result<()> {
+    if db
+        .get_artwork(game_id)?
+        .is_some_and(|a| a.source == ArtSource::None)
+    {
+        db.delete_artwork(game_id)?;
+    }
+    Ok(())
 }
 
 /// Background lookup of `ids` (games with a row already are skipped; see
@@ -412,6 +739,96 @@ mod tests {
         // subtitle rule only applies to the first result
         let s = items(&[(1, "Unrelated"), (2, "Foo: Bar")]);
         assert_eq!(best_match("foo", &s), None);
+    }
+
+    #[test]
+    fn cleaning() {
+        for (from, to) in [
+            ("Dark Souls 3 dev build", "Dark Souls 3"),
+            ("ProjectX_Beta_0.9", "ProjectX"),
+            ("Game Name - Press Build v1.2.3 (Win64)", "Game Name"),
+            ("Portal 2", "Portal 2"),
+            ("Half-Life 2 beta", "Half-Life 2"),
+            ("Cyberpunk 2077", "Cyberpunk 2077"),
+            ("Cyberpunk 2077 v2.1", "Cyberpunk 2077"),
+            ("Hades II demo", "Hades II"),
+            ("Hades_II_Closed_Beta_build_1234", "Hades II"),
+            ("Foo.Bar.Release.Candidate.r1234", "Foo Bar"),
+            ("Foo Development Build b12345 x64", "Foo"),
+            ("Foo (Early Access) [Nightly 2024]", "Foo"),
+            ("Foo (2019)", "Foo 2019"),
+            ("Foo - The Sequel", "Foo - The Sequel"),
+            ("Foo-Beta", "Foo"),
+            ("Foo version 1.2 Setup", "Foo"),
+            ("setup_foo_installer", "foo"),
+            ("Alpha Protocol", "Alpha Protocol"), // first word is real
+            ("PC Building Simulator", "PC Building Simulator"),
+            ("Foo Internal Playtest Debug Shipping", "Foo"),
+            ("Foo RC", "Foo"),
+            ("Dark Souls III 4", "Dark Souls III 4"), // plain numbers stay
+            ("Mr. Foo", "Mr Foo"),
+            ("", ""),
+        ] {
+            assert_eq!(clean_query(from), to, "{from}");
+            assert_eq!(clean_query(to), to, "idempotent: {to}");
+        }
+    }
+
+    #[test]
+    fn numerals_and_symbols() {
+        assert_eq!(key("DARK SOULS™ III"), key("Dark Souls 3"));
+        assert_eq!(key("Hades II"), key("Hades 2"));
+        assert_eq!(key("Final Fantasy XX"), "final fantasy 20");
+        assert_ne!(key("Dark Souls XXI"), key("Dark Souls 21")); // beyond XX: untouched
+        assert_eq!(key("I Am Bread"), "i am bread"); // first token is never converted
+        assert_eq!(key("Ratchet & Clank"), key("Ratchet and Clank"));
+        assert_eq!(key("The Witcher® 3"), key("Witcher III"));
+        assert_ne!(key("Dark Souls 3"), key("Dark Souls 2"));
+    }
+
+    #[test]
+    fn classification_and_base_game_preference() {
+        let r = items(&[
+            (1, "DARK SOULS™ III - The Ringed City"),
+            (2, "DARK SOULS III Soundtrack"),
+            (374320, "DARK SOULS™ III"),
+        ]);
+        assert_eq!(classify("Dark Souls 3", &r), Match::Confident(374320));
+        // extras first in the store order never win
+        let e = items(&[(9, "Portal 2 - Soundtrack"), (620, "Portal 2")]);
+        assert_eq!(best_match("Portal 2", &e), Some(620));
+        // only extras found: candidates, never attached
+        let only = items(&[(9, "Portal 2 Soundtrack"), (8, "Portal 2 Demo")]);
+        assert!(matches!(classify("Portal 2", &only), Match::Candidates(c) if c.len() == 2));
+        // ambiguous: candidates, base games only
+        let a = items(&[(1, "Portal"), (2, "Portal 2"), (3, "Portal Soundtrack")]);
+        assert!(matches!(classify("Portal 3", &a), Match::Candidates(c) if c.len() == 2));
+        assert_eq!(classify("Zzz", &[]), Match::None);
+        // a query that is itself a soundtrack may match one
+        assert_eq!(
+            best_match("Portal 2 Soundtrack", &items(&[(9, "Portal 2 Soundtrack")])),
+            Some(9)
+        );
+    }
+
+    #[test]
+    fn app_ids() {
+        for (i, id) in [
+            ("620", Some(620)),
+            (" 374320 ", Some(374320)),
+            (
+                "https://store.steampowered.com/app/374320/DARK_SOULS_III/",
+                Some(374320),
+            ),
+            ("store.steampowered.com/app/620", Some(620)),
+            ("https://store.steampowered.com/app/620?l=german", Some(620)),
+            ("https://evil.example/app/620", None),
+            ("https://store.steampowered.com/sub/620", None),
+            ("0", None),
+            ("dark souls", None),
+        ] {
+            assert_eq!(parse_app_id(i), id, "{i}");
+        }
     }
 
     #[test]

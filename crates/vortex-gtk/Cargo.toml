@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "vortex"
+name = "vortex-launcher"
 path = "src/main.rs"
 
 [dependencies]
@@ -20,7 +20,7 @@ rustix = { version = "1.1.6", features = ["process"] }
 workspace = true
 
 [package.metadata.deb]
-name = "vortex"
+name = "vortex-launcher"
 maintainer = "NexusDeveloper902"
 section = "games"
 priority = "optional"
@@ -28,26 +28,26 @@ extended-description = "Installs and runs Windows games through Proton via UMU L
 # $auto adds libgtk-4-1, libsqlite3-0 and the rest from the binary; libadwaita is pinned explicitly.
 depends = "$auto, libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.6)"
 assets = [
-  ["target/release/vortex", "usr/bin/", "755"],
+  ["target/release/vortex-launcher", "usr/bin/", "755"],
   ["../../data/io.github.nexusdeveloper902.Vortex.desktop", "usr/share/applications/", "644"],
   ["../../data/io.github.nexusdeveloper902.Vortex.metainfo.xml", "usr/share/metainfo/", "644"],
   ["../../data/icons/hicolor/scalable/apps/io.github.nexusdeveloper902.Vortex.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
   ["../../data/icons/hicolor/symbolic/apps/io.github.nexusdeveloper902.Vortex-symbolic.svg", "usr/share/icons/hicolor/symbolic/apps/", "644"],
-  ["../../LICENSE", "usr/share/doc/vortex/copyright", "644"],
+  ["../../LICENSE", "usr/share/doc/vortex-launcher/copyright", "644"],
 ]
 
 [package.metadata.generate-rpm]
-name = "vortex"
+name = "vortex-launcher"
 license = "GPL-3.0-or-later"
 summary = "Install and run Windows games on Linux through Proton"
 url = "https://github.com/Nexusdeveloper902/Vortex"
 assets = [
-  { source = "target/release/vortex", dest = "/usr/bin/vortex", mode = "755" },
+  { source = "target/release/vortex-launcher", dest = "/usr/bin/vortex-launcher", mode = "755" },
   { source = "../../data/io.github.nexusdeveloper902.Vortex.desktop", dest = "/usr/share/applications/io.github.nexusdeveloper902.Vortex.desktop", mode = "644" },
   { source = "../../data/io.github.nexusdeveloper902.Vortex.metainfo.xml", dest = "/usr/share/metainfo/io.github.nexusdeveloper902.Vortex.metainfo.xml", mode = "644" },
   { source = "../../data/icons/hicolor/scalable/apps/io.github.nexusdeveloper902.Vortex.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.nexusdeveloper902.Vortex.svg", mode = "644" },
   { source = "../../data/icons/hicolor/symbolic/apps/io.github.nexusdeveloper902.Vortex-symbolic.svg", dest = "/usr/share/icons/hicolor/symbolic/apps/io.github.nexusdeveloper902.Vortex-symbolic.svg", mode = "644" },
-  { source = "../../LICENSE", dest = "/usr/share/licenses/vortex/LICENSE", mode = "644", doc = true },
+  { source = "../../LICENSE", dest = "/usr/share/licenses/vortex-launcher/LICENSE", mode = "644", doc = true },
 ]
 
 [package.metadata.generate-rpm.requires]

@@ -6,7 +6,7 @@ runs Windows games through Proton, using [UMU Launcher](https://github.com/Open-
 
 Vortex is not affiliated with Valve, Lutris or Bottles.
 
-> **Status: MVP.** The install-to-launch workflow is implemented: runtime discovery, installers
+> **Status: beta.** The install-to-launch workflow is implemented: runtime discovery, installers
 > (files and folders, nested prerequisites), executable registration, the library, per-game
 > configuration, winetricks, backup and restore, and logs. Verification on a real machine is tracked in
 > [`docs/E2E-REPORT.md`](docs/E2E-REPORT.md), which marks each check as PASS, FAIL or NOT RUN.
@@ -24,7 +24,7 @@ Vortex is not affiliated with Valve, Lutris or Bottles.
 Download from the [latest release](https://github.com/Nexusdeveloper902/Vortex/releases/latest)
 (`sha256sums.txt` and GitHub build provenance attestations are attached):
 
-- `vortex-X.Y.Z-x86_64-linux.tar.gz`: generic binary tarball (see `INSTALL.txt` inside).
+- `vortex-launcher-X.Y.Z-x86_64-linux.tar.gz`: generic binary tarball (see `INSTALL.txt` inside).
 - `.deb`: Debian 13 (trixie) or newer, Ubuntu 25.04 or newer. Older releases ship GTK or libadwaita
   too old (GTK 4.14 and libadwaita 1.6 are required).
 - `.rpm`: Fedora.
@@ -59,7 +59,7 @@ Vortex refuses to run as root, and it never calls `sudo` or `pkexec`. Run it as 
 git clone https://github.com/Nexusdeveloper902/Vortex.git
 cd Vortex
 cargo build --workspace
-cargo run --bin vortex
+cargo run --bin vortex-launcher
 ```
 
 ## Test

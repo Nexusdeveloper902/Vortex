@@ -39,7 +39,7 @@ fn configured_absolute_path_ignores_path_var() {
         "a directory is not a tool"
     );
     let t = Tools {
-        umu_run: fake.replace("/fake-umu-run", "/tests/fake-umu-run").into(),
+        umu_run: format!("{}/tests/fake-umu-run", env!("CARGO_MANIFEST_DIR")).into(),
     };
     assert_eq!(
         which(&t.umu_run, d.path().as_os_str()),

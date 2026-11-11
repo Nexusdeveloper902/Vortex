@@ -158,7 +158,7 @@ fn fake_env() -> Option<Env> {
     std::fs::write(e.dir.as_path().join("game.exe"), "MZ").unwrap();
     if rustix::process::geteuid().is_root() {
         let id = e.game(&[], &[], None);
-        match launch_game(&e.runs, &e.db, &e.paths, id) {
+        match launch_game(&e.runs, &e.db, &e.paths, id, false) {
             Err(Error::Validation(m)) if m.contains("root") => {}
             other => panic!("as root, launch must refuse: {:?}", other.map(|_| ())),
         }
@@ -217,7 +217,7 @@ fn launch_passes_args_env_and_exe_dir_cwd() {
         &[("FAKE_UMU_OUT", &out.to_string_lossy()), ("DXVK_HUD", "1")],
         None,
     );
-    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id).unwrap();
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id, false).unwrap();
     assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(0)));
     let rec = std::fs::read_to_string(&out).unwrap();
     let exe = e.dir.as_path().join("game.exe");
@@ -254,13 +254,13 @@ fn finished_launch_is_diagnosed_before_finished() {
     use vortex_core::diagnose::{Class, from_json};
     let Some(e) = fake_env() else { return };
     let ok = e.game(&[], &[("FAKE_UMU_MODE", "exit:0")], None);
-    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, ok).unwrap();
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, ok, false).unwrap();
     assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(0)));
     let f = e.db.lock().unwrap().get_run(h.run_id()).unwrap().findings;
     assert_eq!(f.as_deref(), Some("[]"));
 
     let bad = e.game(&[], &[("FAKE_UMU_MODE", "exit:42")], None);
-    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, bad).unwrap();
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, bad, false).unwrap();
     assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(42)));
     // Stored before Finished was forwarded.
     let f = e.db.lock().unwrap().get_run(h.run_id()).unwrap().findings;
@@ -276,7 +276,7 @@ fn configured_work_dir_wins() {
     let out = e.dir.as_path().join("rec.out");
     let wd = e.dir.as_path().parent().unwrap().to_path_buf();
     let id = e.game(&[], &[("FAKE_UMU_OUT", &out.to_string_lossy())], Some(&wd));
-    let (_, rx) = launch_game(&e.runs, &e.db, &e.paths, id).unwrap();
+    let (_, rx) = launch_game(&e.runs, &e.db, &e.paths, id, false).unwrap();
     collect(&rx, T);
     let rec = std::fs::read_to_string(&out).unwrap();
     assert!(rec.starts_with(&format!("cwd={}\n", wd.display())), "{rec}");
@@ -286,7 +286,7 @@ fn configured_work_dir_wins() {
 fn missing_exe_is_not_found_and_nothing_spawned() {
     let Some(e) = fake_env() else { return };
     let id = e.game_exe("gone.exe", &[], &[], None);
-    let err = launch_game(&e.runs, &e.db, &e.paths, id)
+    let err = launch_game(&e.runs, &e.db, &e.paths, id, false)
         .map(|_| ())
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)), "{err}");
@@ -297,7 +297,7 @@ fn missing_exe_is_not_found_and_nothing_spawned() {
 fn bad_config_is_rejected() {
     let Some(e) = fake_env() else { return };
     let id = e.game(&[], &[("WINEPREFIX", "/x")], None);
-    let r = launch_game(&e.runs, &e.db, &e.paths, id).map(|_| ());
+    let r = launch_game(&e.runs, &e.db, &e.paths, id, false).map(|_| ());
     assert!(matches!(r, Err(Error::Validation(_))));
     let id = e.game(&[], &[], None);
     e.db.lock()
@@ -311,7 +311,7 @@ fn bad_config_is_rejected() {
             "{}",
         )
         .unwrap();
-    let r = launch_game(&e.runs, &e.db, &e.paths, id).map(|_| ());
+    let r = launch_game(&e.runs, &e.db, &e.paths, id, false).map(|_| ());
     assert!(
         matches!(r, Err(Error::Validation(_))),
         "string args refused"
@@ -322,8 +322,8 @@ fn bad_config_is_rejected() {
 fn second_launch_is_busy_and_stop_finishes() {
     let Some(e) = fake_env() else { return };
     let id = e.game(&[], &[("FAKE_UMU_MODE", "sleep:30")], None);
-    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id).unwrap();
-    let r = launch_game(&e.runs, &e.db, &e.paths, id).map(|_| ());
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id, false).unwrap();
+    let r = launch_game(&e.runs, &e.db, &e.paths, id, false).map(|_| ());
     assert!(matches!(r, Err(Error::Busy(b)) if b == e.env_id));
     let r = run_in_env(
         &e.runs,
@@ -551,6 +551,7 @@ fn experimental_style_runtime_is_refused_clearly() {
         e2.env_id,
         "win10",
         &fixture_verbs(),
+        false,
     )
     .map(|_| ())
     .unwrap_err();
@@ -567,9 +568,17 @@ fn list_install_records_dependency_and_skips_installed() {
     let e = env_with(tools.clone(), sh.runtime.path(), fast());
     let known = winetricks::list_verbs(&tools, &e.runtime, &e.paths).unwrap();
     assert_eq!(known.len(), 7);
-    let (h, rx) = winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "vcrun2019", &known)
-        .unwrap()
-        .unwrap();
+    let (h, rx) = winetricks::install_verb(
+        &e.runs,
+        &e.db,
+        &e.paths,
+        e.env_id,
+        "vcrun2019",
+        &known,
+        false,
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(0)));
     let deps = e.db.lock().unwrap().list_dependencies(e.env_id).unwrap();
     assert_eq!(
@@ -587,13 +596,22 @@ fn list_install_records_dependency_and_skips_installed() {
     );
     // Already installed: nothing runs.
     assert!(
-        winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "vcrun2019", &known)
-            .unwrap()
-            .is_none()
+        winetricks::install_verb(
+            &e.runs,
+            &e.db,
+            &e.paths,
+            e.env_id,
+            "vcrun2019",
+            &known,
+            false
+        )
+        .unwrap()
+        .is_none()
     );
     // Invalid verbs never spawn.
     assert!(
-        winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "foo;rm", &known).is_err()
+        winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "foo;rm", &known, false)
+            .is_err()
     );
     assert_eq!(e.db.lock().unwrap().active_runs().unwrap().len(), 0);
 }
@@ -611,12 +629,140 @@ fn failed_verb_is_recorded_failed() {
         e.env_id,
         "win10",
         &fixture_verbs(),
+        false,
     )
     .unwrap()
     .unwrap();
     collect(&rx, T);
     let deps = e.db.lock().unwrap().list_dependencies(e.env_id).unwrap();
     assert_eq!(deps[0].state, DepState::Failed);
+}
+
+/// `KEY=value` lines of a fake-umu-run env dump that are about verbose logging, sorted.
+fn verbose_env(dump: &Path) -> Vec<String> {
+    std::fs::read_to_string(dump)
+        .unwrap()
+        .lines()
+        .filter(|l| {
+            ["UMU_LOG=", "PROTON_LOG=", "PROTON_LOG_DIR=", "WINEDEBUG="]
+                .iter()
+                .any(|k| l.starts_with(k))
+        })
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+#[test]
+fn verbose_launch_writes_a_redacted_proton_log_and_names_the_missing_file() {
+    let Some(e) = fake_env() else { return };
+    let out = e.dir.as_path().join("rec.out");
+    let dump = Path::new(&format!("{}.env", out.display())).to_path_buf();
+    let id = e.game(
+        &[],
+        &[
+            ("FAKE_UMU_OUT", &out.to_string_lossy()),
+            ("FAKE_UMU_MODE", "protonlog,exit:3"),
+        ],
+        None,
+    );
+    let run_of =
+        |h: &vortex_core::process::RunHandle| e.db.lock().unwrap().get_run(h.run_id()).unwrap();
+
+    // Not verbose: nothing about verbose logging is set (a WINEDEBUG inherited by the test
+    // process passes through unchanged), no Proton log, no missing-file finding.
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id, false).unwrap();
+    assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(3)));
+    let inherited = std::env::var("WINEDEBUG")
+        .ok()
+        .map(|v| format!("WINEDEBUG={v}"));
+    assert_eq!(
+        verbose_env(&dump),
+        inherited.into_iter().collect::<Vec<_>>()
+    );
+    let run = run_of(&h);
+    assert!(!vortex_core::logs::proton_log_dir(Path::new(&run.log_path)).exists());
+    let f = vortex_core::diagnose::from_json(&run.findings.unwrap());
+    assert!(
+        f.iter()
+            .all(|f| f.class != vortex_core::diagnose::Class::MissingFile),
+        "{f:?}"
+    );
+
+    // Verbose: the env contract, the Proton log in the run's managed log dir, redacted.
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id, true).unwrap();
+    assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(3)));
+    let run = run_of(&h);
+    let dir = vortex_core::logs::proton_log_dir(Path::new(&run.log_path));
+    assert!(dir.starts_with(e.paths.logs_dir()), "{}", dir.display());
+    assert_eq!(
+        verbose_env(&dump),
+        [
+            "PROTON_LOG=1".to_string(),
+            format!("PROTON_LOG_DIR={}", dir.display()),
+            "UMU_LOG=debug".to_string(),
+            format!("WINEDEBUG={}", vortex_core::runner::VERBOSE_WINEDEBUG),
+        ]
+    );
+    let plog = vortex_core::logs::proton_log(Path::new(&run.log_path)).unwrap();
+    let text = std::fs::read_to_string(&plog).unwrap();
+    assert!(
+        !text.contains("ghp_") && text.contains("GITHUB_TOKEN=<redacted>"),
+        "{text}"
+    );
+    let header = std::fs::read_to_string(&run.log_path).unwrap();
+    assert!(header.contains(&format!("proton_log_dir: {}", dir.display())));
+    let f = vortex_core::diagnose::from_json(&run.findings.unwrap());
+    let m = f
+        .iter()
+        .find(|f| f.class == vortex_core::diagnose::Class::MissingFile)
+        .unwrap_or_else(|| panic!("{f:?}"));
+    assert!(m.evidence[0].ends_with(r"game dir\data3.bin"), "{m:?}");
+}
+
+#[test]
+fn verbose_winetricks_run_gets_the_proton_log_env() {
+    let Some(_) = fake_env() else { return };
+    let sh = shared();
+    let tools = Tools {
+        umu_run: sh.rec.clone(),
+    };
+    let e = env_with(tools, sh.runtime.path(), fast());
+    let dump = e.prefix.as_path().join(".fake-rec.env");
+    let run = |verbose| {
+        let (h, rx) = winetricks::install_verb(
+            &e.runs,
+            &e.db,
+            &e.paths,
+            e.env_id,
+            "win10",
+            &fixture_verbs(),
+            verbose,
+        )
+        .unwrap()
+        .unwrap();
+        collect(&rx, T);
+        e.db.lock().unwrap().get_run(h.run_id()).unwrap()
+    };
+    run(false);
+    assert!(
+        verbose_env(&dump)
+            .iter()
+            .all(|l| l.starts_with("WINEDEBUG=")),
+        "{:?}",
+        verbose_env(&dump)
+    );
+    let r = run(true);
+    let dir = vortex_core::logs::proton_log_dir(Path::new(&r.log_path));
+    let v = verbose_env(&dump);
+    assert!(v.contains(&"PROTON_LOG=1".to_string()), "{v:?}");
+    assert!(v.contains(&"UMU_LOG=debug".to_string()), "{v:?}");
+    assert!(
+        v.contains(&format!("PROTON_LOG_DIR={}", dir.display())),
+        "{v:?}"
+    );
+    assert!(dir.is_dir());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -646,6 +792,7 @@ fn init_prefix(e: &Env) {
             game_id: None,
             install_id: None,
             invocation: inv,
+            verbose: false,
         })
         .unwrap();
     let o = collect(&rx, Duration::from_secs(900));
@@ -674,7 +821,7 @@ fn it_launch_delivers_args_and_env() {
         &[("VORTEX_TEST_VAR", "hello world")],
         None,
     );
-    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id).unwrap();
+    let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id, false).unwrap();
     assert_eq!(
         collect(&rx, Duration::from_secs(300)).exit,
         Some(Exit::Low8(0))
@@ -687,6 +834,49 @@ fn it_launch_delivers_args_and_env() {
         "arg=one two\narg=--flag=3\narg=$HOME\nenv=hello world\n"
     );
     assert!(scan_marker(h.marker()).is_empty());
+}
+
+#[test]
+#[ignore = "needs real umu-run, VORTEX_IT_PROTON and mingw-w64-gcc"]
+fn it_verbose_launch_names_the_missing_data_file() {
+    let proton = std::env::var("VORTEX_IT_PROTON").expect("VORTEX_IT_PROTON must be set");
+    let e = env_with(Tools::default(), Path::new(&proton), Timing::default());
+    init_prefix(&e);
+    let src = Path::new(MANIFEST).join("tests/fixtures/launch/needsdata.c");
+    let exe = e.dir.as_path().join("needsdata.exe");
+    let st = std::process::Command::new("x86_64-w64-mingw32-gcc")
+        .args(["-O2", "-o"])
+        .arg(&exe)
+        .arg(&src)
+        .status()
+        .unwrap_or_else(|er| panic!("mingw-w64-gcc not available ({er}): NOT RUN"));
+    assert!(st.success());
+    let id = e.game_exe("needsdata.exe", &[], &[], None);
+    let launch = |verbose| {
+        let (h, rx) = launch_game(&e.runs, &e.db, &e.paths, id, verbose).unwrap();
+        let o = collect(&rx, Duration::from_secs(300));
+        assert_eq!(o.exit, Some(Exit::Low8(3)));
+        assert!(scan_marker(h.marker()).is_empty());
+        e.db.lock().unwrap().get_run(h.run_id()).unwrap()
+    };
+    let missing = |r: &vortex_core::db::Run| {
+        vortex_core::diagnose::from_json(r.findings.as_deref().unwrap_or("[]"))
+            .into_iter()
+            .find(|f| f.class == vortex_core::diagnose::Class::MissingFile)
+    };
+    let r = launch(false);
+    assert!(vortex_core::logs::proton_log(Path::new(&r.log_path)).is_none());
+    assert!(missing(&r).is_none());
+
+    let r = launch(true);
+    let plog = vortex_core::logs::proton_log(Path::new(&r.log_path)).expect("Proton log");
+    assert!(plog.starts_with(e.paths.logs_dir()));
+    let size = std::fs::metadata(&plog).unwrap().len();
+    eprintln!("proton log {} ({size} bytes)", plog.display());
+    let f = missing(&r).unwrap_or_else(|| panic!("no MissingFile finding: {:?}", r.findings));
+    eprintln!("finding: {f:?}");
+    assert!(f.evidence[0].ends_with(r"game dir\data3.bin"), "{f:?}");
+    assert!(!f.evidence[0].contains(".dll") && !f.evidence[0].contains(".manifest"));
 }
 
 #[test]
@@ -722,9 +912,10 @@ fn it_winetricks_with_ge_proton() {
             .iter()
             .any(|v| v.name == "vcrun2005" && v.section == "dlls")
     );
-    let (h, rx) = winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "win10", &known)
-        .unwrap()
-        .unwrap();
+    let (h, rx) =
+        winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "win10", &known, false)
+            .unwrap()
+            .unwrap();
     let o = collect(&rx, Duration::from_secs(1800));
     eprintln!(
         "log: {}",
@@ -740,7 +931,7 @@ fn it_winetricks_with_ge_proton() {
     );
     assert!(scan_marker(h.marker()).is_empty());
     assert!(
-        winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "win10", &known)
+        winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "win10", &known, false)
             .unwrap()
             .is_none()
     );

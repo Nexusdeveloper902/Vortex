@@ -1,0 +1,32 @@
+======================
+Proton: 1793301796 experimental-11.0-20261027b-x86_64
+SteamGameId: 0
+Options: {'forcelgadd'}
+depot: 4.0.20261110.268882
+pressure-vessel: 0.20261110.0
+pressure-vessel-arm64: 0.20261110.0
+scripts: 0.20261110.0
+steamrt4: 4.0.20261110.268882 steamrt4 4.0.20261110.268882
+Language: LC_ALL None, LC_MESSAGES None, LC_CTYPE None
+System WINEDEBUG: warn+file
+Effective WINEDEBUG: warn+file
+======================
+No NV driver found, disabling nvapi
+ntsync: up and running.
+002c:warn:file:NtCreateFile L"\\??\\C:\\windows\\wininit.ini" not found (c0000034)
+002c:warn:file:CreateFileW Unable to create file L"C:\\windows\\wininit.ini" (status c0000034)
+002c:warn:file:NtCreateFile L"\\??\\C:\\windows\\wininit.ini" not found (c0000034)
+002c:warn:file:CreateFileW Unable to create file L"C:\\windows\\wininit.ini" (status c0000034)
+002c:warn:file:NtCreateFile L"\\??\\C:\\windows\\system32\\dllcache\\" not found (c0000034)
+0034:warn:file:NtCreateFile L"\\??\\C:\\windows\\system32\\services.exe.manifest" not found (c0000034)
+0040:warn:file:NtCreateFile L"\\??\\C:\\windows\\system32\\winedevice.exe.manifest" not found (c0000034)
+0058:warn:file:CreateFileW Unable to create file L"\\\\?\\unix/dev/nvme0n1p1" (status c0000022)
+0058:warn:file:CreateFileW Unable to create file L"\\\\?\\unix/dev/sda1" (status c0000022)
+0058:warn:file:CreateFileW Unable to create file L"\\\\?\\unix/dev/zram0" (status c0000022)
+0138:warn:file:NtCreateFile L"\\??\\Z:\\tmp\\vortex-it\\src\\setup.exe.manifest" not found (c0000034)
+0138:warn:file:NtCreateFile L"\\??\\Z:\\tmp\\vortex-it\\src\\ucrtbase.dll" not found (c0000034)
+0138:warn:file:NtCreateFile L"\\??\\Z:\\tmp\\vortex-it\\src\\data3.bin" not found (c0000034)
+0138:warn:file:CreateFileW Unable to create file L"data3.bin" (status c0000034)
+0120:warn:file:NtCreateFile L"\\??\\Z:\\home\\u\\.local\\share\\Steam\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\4.5\\oleaut32.dll" not found (c0000034)
+0120:warn:file:NtCreateFile L"\\??\\Z:\\home\\u\\.local\\share\\Steam\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\4.5\\oleaut32.dll.la" not found (c0000034)
+0120:warn:file:CreateFileW Unable to create file L"Z:\\home\\u\\.local\\share\\Steam\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\4.5\\oleaut32.dll.la" (status c0000034)

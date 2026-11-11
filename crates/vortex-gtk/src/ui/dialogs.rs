@@ -55,7 +55,7 @@ pub fn format_plan(plan: &DeletionPlan) -> String {
         out.push_str(&format!("\n\nTotal: {}\n", human_size(total)));
     }
     if plan.remove_env {
-        out.push_str("\nThe Wine prefix of this game is removed too.\n");
+        out.push_str("\nThe Wine prefix of this game is removed too, unless it is listed below.\n");
     } else {
         out.push_str("\nThe prefix is shared with other games and is kept.\n");
     }
@@ -110,6 +110,7 @@ pub fn finding_text(f: &Finding) -> String {
         }
         Class::WrongWorkingDirectory => "The program was started from the wrong folder.",
         Class::GraphicsPrerequisite => "A graphics (Vulkan) prerequisite seems to be missing.",
+        Class::MissingFile => "The program could not find a file it needs.",
         Class::Unknown => "The run failed for an unknown reason. See the log.",
     };
     let conf = match f.confidence {

@@ -51,7 +51,7 @@ pub fn present(state: &Rc<AppState>) {
 
     let dirs = adw::PreferencesGroup::builder()
         .title("Folders")
-        .description("Leave empty to use Vortex's own folders.")
+        .description("Defaults for new installs: each game gets a folder named after it inside these. The install folder is the one you choose in the game's installer; Vortex looks for the game there. The prefix folder holds the game's Wine prefix, which Vortex then never deletes. Leave empty to use Vortex's own folders. You can change both in the install wizard.")
         .build();
     dirs.add(&dir_row(state, "Default install folder", KEY_INSTALL_DIR));
     dirs.add(&dir_row(state, "Default prefix folder", KEY_PREFIX_DIR));

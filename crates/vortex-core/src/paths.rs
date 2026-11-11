@@ -141,6 +141,81 @@ pub fn create_private_dir(dir: &Path) -> Result<()> {
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(Error::io(dir))
 }
 
+/// A folder name for a game (`<default folder>/<name>` in the wizard): path separators and
+/// control characters dropped, never empty, `.` or `..`.
+pub fn folder_name(game: &str) -> String {
+    let s: String = game
+        .chars()
+        .filter(|c| *c != '/' && *c != '\\' && !c.is_control())
+        .collect();
+    let s = s.trim().trim_start_matches('.').trim();
+    if s.is_empty() {
+        "game".into()
+    } else {
+        s.into()
+    }
+}
+
+/// Checks a location where Vortex will create a folder the user chose: it does not exist yet or
+/// is an empty directory (not a symlink), and its parent is an existing, writable directory.
+/// Returns the path with its parent canonicalized (symlinks in the parent resolved).
+pub fn new_dir_location(p: &HostPath) -> Result<HostPath> {
+    let bad = |why: &str| Error::InvalidPath(format!("{}: {why}", p.0.display()));
+    let (Some(parent), Some(name)) = (p.0.parent(), p.0.file_name()) else {
+        return Err(bad("choose a folder below /"));
+    };
+    let parent = std::fs::canonicalize(parent)
+        .ok()
+        .filter(|d| d.is_dir())
+        .ok_or_else(|| bad("its parent folder does not exist"))?;
+    if rustix::fs::access(&parent, rustix::fs::Access::WRITE_OK).is_err() {
+        return Err(bad("its parent folder is not writable"));
+    }
+    let full = parent.join(name);
+    match std::fs::symlink_metadata(&full) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(Error::io(&full)(e)),
+        Ok(m) if m.is_symlink() => return Err(bad("it is a symlink")),
+        Ok(m) if !m.is_dir() => return Err(bad("it is not a folder")),
+        Ok(_) => {
+            if std::fs::read_dir(&full)
+                .map_err(Error::io(&full))?
+                .next()
+                .is_some()
+            {
+                return Err(bad("the folder is not empty"));
+            }
+        }
+    }
+    HostPath::new(full)
+}
+
+/// A user-chosen location for a new prefix (spec 4): a [`new_dir_location`] that is not `/` or
+/// `$HOME`, not inside Vortex's data folder (that is the managed default), and neither inside nor
+/// around any `known` prefix. Vortex creates it but records it `prefix_managed = 0`
+/// (ARCHITECTURE section 11, rule 5): it is never deleted by Vortex.
+pub fn check_prefix_location(
+    p: &HostPath,
+    paths: &Paths,
+    known: &[PrefixDir],
+) -> Result<PrefixDir> {
+    let canon = |x: &Path| std::fs::canonicalize(x).unwrap_or_else(|_| x.to_path_buf());
+    let h = new_dir_location(p)?;
+    let bad = |why: String| Error::InvalidPath(format!("{}: {why}", h.0.display()));
+    if h.0.starts_with(canon(paths.data_dir())) {
+        return Err(bad(
+            "it is inside Vortex's own folder; leave the prefix location empty instead".into(),
+        ));
+    }
+    for k in known {
+        let k = canon(k.as_path());
+        if h.0.starts_with(&k) || k.starts_with(&h.0) {
+            return Err(bad(format!("it overlaps the prefix {}", k.display())));
+        }
+    }
+    PrefixDir::new(&h, &canon(paths.home()), &[])
+}
+
 /// Managed roots. `from_xdg` for the app, `under(root)` for tests (never touches real XDG dirs).
 #[derive(Debug, Clone)]
 pub struct Paths {
@@ -297,6 +372,67 @@ mod tests {
         assert_eq!(
             p.managed_prefix(7).unwrap().as_path(),
             Path::new("/tmp/x/data/prefixes/7")
+        );
+    }
+
+    #[test]
+    fn folder_names() {
+        assert_eq!(folder_name("Foo: Bar"), "Foo: Bar");
+        assert_eq!(folder_name(" a/b\\c "), "abc");
+        for bad in ["", "  ", ".", "..", "/", "\n"] {
+            assert_eq!(folder_name(bad), "game", "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn new_dir_location_rules() {
+        let t = tempfile::tempdir().unwrap();
+        let r = t.path();
+        let at = |rel: &str| new_dir_location(&h(r.join(rel).to_str().unwrap()));
+        std::fs::create_dir_all(r.join("empty")).unwrap();
+        std::fs::create_dir_all(r.join("full/x")).unwrap();
+        std::fs::write(r.join("file"), "x").unwrap();
+        std::os::unix::fs::symlink(r.join("empty"), r.join("link")).unwrap();
+        assert!(at("new").is_ok());
+        assert!(at("empty").is_ok());
+        assert!(at("link/new").is_ok(), "symlink in the parent is resolved");
+        assert_eq!(
+            at("link/new").unwrap().as_path(),
+            std::fs::canonicalize(r.join("empty")).unwrap().join("new")
+        );
+        for bad in ["full", "file", "link", "missing/new", "file/new"] {
+            assert!(at(bad).is_err(), "{bad}");
+        }
+        assert!(new_dir_location(&h("/")).is_err());
+    }
+
+    #[test]
+    fn prefix_location_rules() {
+        let t = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(t.path()).unwrap();
+        let paths = Paths::under(&root);
+        std::fs::create_dir_all(paths.prefixes_dir()).unwrap();
+        std::fs::create_dir_all(paths.home()).unwrap();
+        let other = root.join("wine/other");
+        std::fs::create_dir_all(&other).unwrap();
+        let known = [PrefixDir::new(&other, paths.home(), &[]).unwrap()];
+        let at = |p: &Path| check_prefix_location(&h(p.to_str().unwrap()), &paths, &known);
+        assert!(at(&root.join("wine/mine")).is_ok());
+        assert!(at(&paths.home().join("Games")).is_ok());
+        for bad in [
+            paths.home().to_path_buf(),
+            paths.prefixes_dir().join("9"),
+            paths.data_dir().join("x"),
+            other.join("inner"),
+            other.clone(),
+        ] {
+            assert!(at(&bad).is_err(), "{bad:?}");
+        }
+        // around a known prefix: an empty parent of it cannot exist, so check with a fresh dir
+        let known2 = [PrefixDir::new(root.join("g/p"), paths.home(), &[]).unwrap()];
+        std::fs::create_dir_all(root.join("g")).unwrap();
+        assert!(
+            check_prefix_location(&h(root.join("g").to_str().unwrap()), &paths, &known2).is_err()
         );
     }
 }

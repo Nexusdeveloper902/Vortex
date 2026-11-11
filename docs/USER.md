@@ -55,8 +55,17 @@ installed are never looked up in the background.
    folder that contains the installer and its data files.
 2. If the folder holds several installers, the wizard asks you to choose the one that starts the
    installation. Vortex never runs all of them.
-3. On **Name and location**, enter the game name. The install folder is optional and must already
-   exist. If you leave it empty, the installer uses its default location inside the game's prefix.
+3. On **Name and location**, enter the game name. The install folder is optional: it is the Linux
+   folder you then choose in the installer (your Linux folders appear on drive `Z:`), and Vortex looks
+   there for the game's executable afterwards. It may be a new folder whose parent exists; Vortex
+   creates it. If you leave it empty, the installer uses its default location inside the game's
+   prefix. Under **Advanced**, **Prefix location** sets where the Wine prefix is created. Leave it
+   empty for Vortex's own prefixes folder. A custom location must be an empty or new folder (with an
+   existing, writable parent), not your home folder, not inside Vortex's own folder, and not inside or
+   around another prefix. Vortex never deletes a prefix at a custom location (see Uninstall and
+   remove), and it cannot be restored from a backup (backing it up works).
+   With **Default install folder** or **Default prefix folder** set in **Preferences**, the fields
+   start as `<that folder>/<game name>` and follow the name until you edit them.
 4. Vortex creates the Wine prefix and runs the installer. The installer's folder is its working
    directory, and the installer reads its files in place. Vortex never modifies your source files.
    Installers always run with sound off (there is no option to turn it on). Only the installer and
@@ -175,7 +184,9 @@ Vortex has two different removal actions. The overflow menu on the game page hol
 - **Remove completely** removes the game from the library and deletes Vortex's files for it. Vortex
   first shows the exact plan:
   - Install folders that Vortex created, under its own `games` folder, with their sizes.
-  - The Wine prefix, but only if no other game uses it and Vortex created it.
+  - The Wine prefix, but only if no other game uses it and it is in Vortex's own prefixes folder.
+    A prefix at a custom location or an adopted prefix is listed under "Vortex will NOT delete these
+    folders" instead.
   - Folders you chose yourself (outside Vortex's `games` folder) are never deleted. They are listed
     under "Vortex will NOT delete these folders", so you can remove them yourself.
   - Installer files and folders you picked are never touched. Adopted prefixes are never touched.
@@ -192,6 +203,29 @@ viewer copies the file wherever you choose.
 
 Every line from a program goes through redaction before it reaches a log file or the screen. Lines
 that Vortex itself writes start with `vortex: `. Vortex does not log your full environment.
+
+### Retry with verbose log
+
+A normal log holds only umu's and Proton's own messages: installers and games print nothing there.
+When a run fails, **Retry with verbose log** runs it again with Proton's logging on:
+
+- a failed install: on the install progress page, next to **Retry**;
+- a failed launch: in the "did not run correctly" dialog;
+- a failed dependency install: on its run page.
+
+The verbose run sets `PROTON_LOG=1`, `UMU_LOG=debug` and `WINEDEBUG=+seh,+loaddll,warn+file` (unless
+the game's own environment variables set `WINEDEBUG`; yours wins). Proton writes its log next to the run
+log, in `~/.local/share/vortex/logs/<id>/<run id>-<kind>.proton/steam-0.log`. It is usually tens of KB.
+Vortex redacts it when the run ends and again when you open it. In **Logs**, a verbose run has a
+**Proton log** button.
+
+`warn+file` makes Wine log every file a program tried to open and did not find. When a verbose run
+fails, Vortex names those files if they are in the program's working folder (for an installer, its
+source folder). Probes for DLLs and manifests next to the program are normal and left out. An installer
+gets "The installer's source files are missing", a game gets "The program could not find a file it
+needs", both Likely, with the paths, for example
+`not found (verbose log): Z:\home\you\Downloads\Game\setup-2.bin`. A file is named only when the log
+shows it was not found.
 
 ## Running processes, quitting and interrupted installs
 
@@ -220,6 +254,7 @@ All paths follow the XDG base directories. With default settings:
 | GE-Proton installed by Vortex | `~/.local/share/vortex/runtimes/` |
 | Backups | `~/.local/share/vortex/backups/` |
 | Logs | `~/.local/share/vortex/logs/<game or environment id>/<run id>-<kind>.log` |
+| Proton logs of verbose runs | `~/.local/share/vortex/logs/<game or environment id>/<run id>-<kind>.proton/` |
 | Cover images | `~/.local/share/vortex/artwork/<game id>.img` |
 | Applications menu entries | `~/.local/share/applications/io.github.nexusdeveloper902.Vortex.game-<id>.desktop` |
 
@@ -273,8 +308,7 @@ to report the problem.
 - Installer arguments are not supported. An MSI runs interactively.
 - Installer candidates are looked for only in the install folder and the standard Program Files, GOG
   and Games folders inside the prefix. Use Browse for anything else.
-- The **Default install folder** and **Default prefix folder** preferences are saved but not used yet.
-  Offline mode only blocks runtime and artwork downloads.
+- Offline mode only blocks runtime and artwork downloads.
 - Winetricks has been checked for `win10` only.
 - Vortex is an early MVP. Metadata other than cover art, cloud saves, community recipes and gamepad configuration are
   not implemented.

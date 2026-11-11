@@ -301,6 +301,8 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
     }
     let (state, id) = (state.clone(), g.id);
     let installed_label = status_label(g.status.as_str()).to_string();
+    // Set by "Retry with verbose log"; consumed by the next Play.
+    let verbose_next = Rc::new(std::cell::Cell::new(false));
     play.connect_clicked(move |b| {
         match running.borrow().clone() {
             Some(Playing::Live(h)) => {
@@ -329,6 +331,14 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
             None => {}
         }
         b.set_sensitive(false);
+        let verbose = verbose_next.replace(false);
+        let retry_verbose = {
+            let (b, v) = (b.clone(), verbose_next.clone());
+            move || {
+                v.set(true);
+                b.emit_clicked();
+            }
+        };
         let (state, running, sub, mark, set_running, label) = (
             state.clone(),
             running.clone(),
@@ -340,7 +350,8 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
         glib::spawn_future_local(async move {
             let (runs, db, paths) = (state.runs.clone(), state.db.clone(), state.paths.clone());
             let res =
-                crate::app::blocking(move || launch::launch_game(&runs, &db, &paths, id)).await;
+                crate::app::blocking(move || launch::launch_game(&runs, &db, &paths, id, verbose))
+                    .await;
             let (h, rx) = match res {
                 Some(Ok(v)) => v,
                 Some(Err(e)) => {
@@ -365,7 +376,7 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
                         set_running(false);
                         sub.set_label(&label);
                         if !o.stopped && !o.user_forced && o.exit != Some(Exit::Low8(0)) {
-                            launch_failed(&state, id, run_id, &o);
+                            launch_failed(&state, id, run_id, &o, retry_verbose.clone());
                         } else {
                             state.toast(&run_view::outcome_label(&o));
                         }
@@ -408,8 +419,14 @@ fn playing(runs: &Runs, env_id: i64) -> Option<Playing> {
 }
 
 /// A launch that ended badly: what diagnose found (stored by core before `Finished`), with a way
-/// to the logs.
-fn launch_failed(state: &Rc<AppState>, game_id: i64, run_id: i64, o: &Outcome) {
+/// to the logs and a verbose retry.
+fn launch_failed(
+    state: &Rc<AppState>,
+    game_id: i64,
+    run_id: i64,
+    o: &Outcome,
+    retry_verbose: impl Fn() + 'static,
+) {
     let findings = state
         .db()
         .get_run(run_id)
@@ -420,14 +437,15 @@ fn launch_failed(state: &Rc<AppState>, game_id: i64, run_id: i64, o: &Outcome) {
     let body = failure_text(&run_view::outcome_label(o), &findings);
     let d = adw::AlertDialog::new(Some("The game did not run correctly"), Some(&body));
     d.add_response("close", "Close");
+    d.add_response("verbose", "Retry with verbose log");
     d.add_response("logs", "Show logs");
     d.set_default_response(Some("logs"));
     d.set_close_response("close");
     let s = state.clone();
-    d.connect_response(None, move |_, r| {
-        if r == "logs" {
-            manage::logs_page(&s, game_id);
-        }
+    d.connect_response(None, move |_, r| match r {
+        "logs" => manage::logs_page(&s, game_id),
+        "verbose" => retry_verbose(),
+        _ => {}
     });
     d.present(Some(&state.window));
 }

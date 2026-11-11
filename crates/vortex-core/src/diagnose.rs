@@ -39,6 +39,8 @@ pub enum Class {
     WrongWorkingDirectory,
     /// Vulkan/graphics prerequisite problem (spec 10 "basic Vulkan diagnostics").
     GraphicsPrerequisite,
+    /// A file the program tried to open does not exist (from a verbose log, [`missing_files`]).
+    MissingFile,
     Unknown,
 }
 
@@ -304,6 +306,89 @@ pub fn exit_of(e: Option<crate::process::Exit>) -> Exit {
     }
 }
 
+/// Probing the program's own folder for these is normal (DLL search order, side-by-side
+/// manifests, .NET config); a "not found" for them names nothing missing.
+const PROBE_EXT: &[&str] = &["dll", "drv", "manifest", "local", "config", "mui"];
+
+/// The Windows path of a failed open in a verbose Proton log (`WINEDEBUG=warn+file`):
+/// `warn:file:NtCreateFile L"\\??\\Z:\\dir\\data3.bin" not found (c0000034)` [VL M19].
+fn not_found_path(line: &str) -> Option<String> {
+    const KEY: &str = "warn:file:NtCreateFile L\"";
+    let rest = &line[line.find(KEY)? + KEY.len()..];
+    let raw = &rest[..rest.find("\" not found (")?];
+    let p = raw.replace("\\\\", "\\");
+    Some(p.strip_prefix("\\??\\").unwrap_or(&p).to_string())
+}
+
+/// Files a failed run tried to open under its Windows working directory (`cwd_win`, from the
+/// run log header) and that do not exist, read from the run's verbose Proton log. Only names
+/// what the log shows as not found; DLL/manifest probing is left out. `None` for a successful
+/// run (programs often look for optional files) or when nothing is found.
+pub fn missing_files(
+    kind: RunKind,
+    exit: Exit,
+    cwd_win: &str,
+    log: impl std::io::BufRead,
+) -> Option<Finding> {
+    let failed = matches!(exit, Exit::Code(c) if c != 0 && c != 3010 && c != 1641)
+        || matches!(exit, Exit::Signal(_));
+    if !failed {
+        return None;
+    }
+    let dir = format!("{}\\", cwd_win.trim_end_matches('\\')).to_lowercase();
+    let mut files: Vec<String> = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
+    for line in log.split(b'\n').map_while(std::result::Result::ok) {
+        let line = String::from_utf8_lossy(&line);
+        let Some(p) = not_found_path(&line) else {
+            continue;
+        };
+        let low = p.to_lowercase();
+        let probe = low
+            .rsplit_once('.')
+            .is_some_and(|(_, e)| PROBE_EXT.contains(&e));
+        if !low.starts_with(&dir) || probe || files.iter().any(|f| f.to_lowercase() == low) {
+            continue;
+        }
+        if lines.len() < 2 {
+            lines.push(crate::logs::redact(line.trim()).into_owned());
+        }
+        files.push(p);
+        if files.len() == 10 {
+            break;
+        }
+    }
+    if files.is_empty() {
+        return None;
+    }
+    let class = if kind == RunKind::Install {
+        Class::MissingInstallerData
+    } else {
+        Class::MissingFile
+    };
+    let names = crate::logs::redact(&files.join(", ")).into_owned();
+    let mut evidence = vec![format!("not found (verbose log): {names}")];
+    evidence.extend(lines);
+    Some(Finding {
+        class,
+        // The file is missing for sure; that it made the run fail is inferred.
+        confidence: Confidence::Likely,
+        evidence,
+    })
+}
+
+/// [`missing_files`] for a finished run, from the Proton log next to its run log (none for a
+/// run that was not verbose).
+pub fn missing_files_of_run(
+    run_log: &std::path::Path,
+    kind: RunKind,
+    exit: Exit,
+    cwd_win: &str,
+) -> Option<Finding> {
+    let f = std::fs::File::open(crate::logs::proton_log(run_log)?).ok()?;
+    missing_files(kind, exit, cwd_win, std::io::BufReader::new(f))
+}
+
 /// The output lines of a run log: everything after the header's `--` separator.
 pub fn log_lines(log: &str) -> Vec<String> {
     log.lines()
@@ -322,6 +407,7 @@ const CLASSES: &[Class] = &[
     Class::MissingInstallerData,
     Class::WrongWorkingDirectory,
     Class::GraphicsPrerequisite,
+    Class::MissingFile,
     Class::Unknown,
 ];
 
@@ -718,6 +804,49 @@ mod tests {
             exit_of(Some(crate::process::Exit::Low8(42))),
             Exit::Code(42)
         );
+    }
+
+    #[test]
+    fn verbose_log_names_the_missing_file_and_nothing_else() {
+        let log = || {
+            std::fs::read(format!(
+                "{}/tests/fixtures/logs/real-proton-verbose-missing-data.log",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap()
+        };
+        let cwd = r"Z:\tmp\vortex-it\src";
+        let f = missing_files(RunKind::Install, Exit::Code(3), cwd, &log()[..]).unwrap();
+        assert_eq!(
+            (f.class, f.confidence),
+            (Class::MissingInstallerData, Confidence::Likely)
+        );
+        // Only data3.bin: not the DLL/manifest probes next to setup.exe, not C:\windows noise.
+        assert_eq!(
+            f.evidence[0],
+            r"not found (verbose log): Z:\tmp\vortex-it\src\data3.bin"
+        );
+        assert!(f.evidence[1].contains("NtCreateFile"));
+        let f = missing_files(
+            RunKind::Launch,
+            Exit::Code(1),
+            r"z:\TMP\vortex-it\src\",
+            &log()[..],
+        );
+        assert_eq!(f.unwrap().class, Class::MissingFile);
+        // A successful run, or a log with nothing under the cwd, names nothing.
+        assert!(missing_files(RunKind::Install, Exit::Code(0), cwd, &log()[..]).is_none());
+        assert!(missing_files(RunKind::Install, Exit::Code(3010), cwd, &log()[..]).is_none());
+        assert!(
+            missing_files(RunKind::Install, Exit::Code(3), r"Z:\tmp\other", &log()[..]).is_none()
+        );
+        assert!(missing_files(RunKind::Install, Exit::Code(3), cwd, &b""[..]).is_none());
+        let f = from_json(&to_json(&[Finding {
+            class: Class::MissingFile,
+            confidence: Confidence::Likely,
+            evidence: vec![],
+        }]));
+        assert_eq!(f[0].class, Class::MissingFile);
     }
 
     #[test]

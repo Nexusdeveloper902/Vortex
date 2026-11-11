@@ -199,8 +199,21 @@ pub fn follow(view: &Rc<RunView>, rx: Receiver<RunEvent>, on_done: impl Fn(Outco
     });
 }
 
+/// True for a run that ended on its own with a non-zero exit (not stopped, not marked finished).
+pub fn failed(o: &Outcome) -> bool {
+    !o.stopped && !o.user_forced && o.exit != Some(Exit::Low8(0))
+}
+
 /// Pushes a run view page for a run started elsewhere (run exe, uninstaller, winetricks).
-pub fn present(state: &Rc<AppState>, title: &str, handle: RunHandle, rx: Receiver<RunEvent>) {
+/// `retry_verbose` starts the same job again with a verbose log; it is offered once the run
+/// has [`failed`], and replaces this page.
+pub fn present(
+    state: &Rc<AppState>,
+    title: &str,
+    handle: RunHandle,
+    rx: Receiver<RunEvent>,
+    retry_verbose: Option<Rc<dyn Fn()>>,
+) {
     let view = RunView::new("Stop");
     {
         let h = handle.clone();
@@ -211,7 +224,22 @@ pub fn present(state: &Rc<AppState>, title: &str, handle: RunHandle, rx: Receive
         view.mark_btn
             .connect_clicked(move |_| handle.mark_finished());
     }
-    follow(&view, rx, |_| {});
+    if let Some(retry) = retry_verbose {
+        let btn = gtk4::Button::builder()
+            .label("Retry with verbose log")
+            .css_classes(["pill"])
+            .visible(false)
+            .build();
+        let nav = state.nav.clone();
+        btn.connect_clicked(move |_| {
+            nav.pop();
+            retry();
+        });
+        view.root.append(&btn);
+        follow(&view, rx, move |o| btn.set_visible(failed(&o)));
+    } else {
+        follow(&view, rx, |_| {});
+    }
     let clamp = adw::Clamp::builder()
         .maximum_size(640)
         .margin_top(18)
@@ -246,6 +274,10 @@ mod tests {
             "Stopped (killed by signal 9)"
         );
         assert!(outcome_label(&o(None, false, true)).starts_with("Marked as finished"));
+        assert!(failed(&o(Some(Exit::Low8(1)), false, false)));
+        assert!(!failed(&o(Some(Exit::Low8(0)), false, false)));
+        assert!(!failed(&o(Some(Exit::Signal(9)), true, false)));
+        assert!(!failed(&o(None, false, true)));
     }
 
     #[test]

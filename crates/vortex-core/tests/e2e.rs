@@ -134,6 +134,7 @@ impl World {
                 installer: a.candidates[0].path.clone(),
                 runtime: runtime.clone(),
                 install_dir: None,
+                prefix: None,
             })
             .unwrap();
         let (evs, select_at) = drive(&s, name);
@@ -202,7 +203,7 @@ impl World {
 
     /// Launches through `launch::launch_game` and waits for `Finished`.
     fn launch(&self, id: i64) -> (Outcome, Run) {
-        let (h, rx) = launch::launch_game(&self.runs, &self.db, &self.paths, id).unwrap();
+        let (h, rx) = launch::launch_game(&self.runs, &self.db, &self.paths, id, false).unwrap();
         let o = finish(&rx);
         assert!(
             scan_marker(h.marker()).is_empty(),
@@ -635,7 +636,7 @@ fn it_e2e_install_to_launch() {
     let env_s = w.db().get_game(s).unwrap().environment_id;
     let known = winetricks::list_verbs(&Tools::default(), &ge, &w.paths).unwrap();
     say!("winetricks: {} verbs", known.len());
-    let (h, rx) = winetricks::install_verb(&w.runs, &w.db, &w.paths, env_s, "win10", &known)
+    let (h, rx) = winetricks::install_verb(&w.runs, &w.db, &w.paths, env_s, "win10", &known, false)
         .unwrap()
         .unwrap();
     let o = finish(&rx);
@@ -658,7 +659,7 @@ fn it_e2e_install_to_launch() {
     // Experimental cannot run winetricks: refused with a clear error, nothing runs.
     let env_m = w.db().get_game(m).unwrap().environment_id;
     let e = err(winetricks::install_verb(
-        &w.runs, &w.db, &w.paths, env_m, "win10", &known,
+        &w.runs, &w.db, &w.paths, env_m, "win10", &known, false,
     ));
     say!("winetricks on Experimental: {e}");
     assert!(matches!(e, Error::RuntimeInvalid { .. }));
@@ -710,7 +711,7 @@ fn it_e2e_install_to_launch() {
         b.archive_path
     );
     std::fs::remove_file(game_dir.join("Game.exe")).unwrap();
-    let e = err(launch::launch_game(&w.runs, &w.db, &w.paths, m));
+    let e = err(launch::launch_game(&w.runs, &w.db, &w.paths, m, false));
     say!("launch with the exe deleted: {e}");
     assert!(matches!(e, Error::NotFound(_)), "{e:?}");
     backup::restore(&w.db(), &w.paths, b.id, &pm, true).unwrap();
@@ -755,7 +756,7 @@ fn it_e2e_install_to_launch() {
     w.db()
         .set_environment_runtime(env_i, &bogus.to_string_lossy())
         .unwrap();
-    let e = err(launch::launch_game(&w.runs, &w.db, &w.paths, i));
+    let e = err(launch::launch_game(&w.runs, &w.db, &w.paths, i, false));
     say!("launch with a broken PROTONPATH: {e}");
     assert!(matches!(e, Error::RuntimeInvalid { .. }), "{e:?}");
     w.db()
@@ -842,6 +843,7 @@ fn it_e2e_missing_installer_data() {
             installer: a.candidates[0].path.clone(),
             runtime: w.exp.clone(),
             install_dir: None,
+            prefix: None,
         })
         .unwrap();
     let (evs, _) = drive(&s, "broken");
@@ -898,6 +900,7 @@ fn e2e_child_begins_install() {
             installer: a.candidates[0].path.clone(),
             runtime: w.exp.clone(),
             install_dir: None,
+            prefix: None,
         })
         .unwrap();
     loop {

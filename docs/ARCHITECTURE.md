@@ -179,8 +179,17 @@ Command::new(tools.umu_run)                // default: "umu-run" resolved on PAT
 - Installer EXE: program = `exe_host`, `cwd_host` = installer's parent. MSI:
   `C:\windows\system32\msiexec.exe /i <exe_win> /qn?`, `cwd_host` = msi's parent (so
   `STEAM_COMPAT_INSTALL_PATH` = msi's parent). `Z:\` paths install [VL M1 S7, M7]; a missing MSI gives 2.
-- Verbose mode (per-run toggle): `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=<run log dir>`.
-  umu then prints the whole environment, which is why redaction runs on every line (section 10).
+- Verbose mode (`RunSpec::verbose`, per run; the UI offers it as "Retry with verbose log"):
+  `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=logs/<owner>/<run_id>-<kind>.proton/` (next to
+  the run log, so `runs.log_path` links both; created 0700 before the spawn) and, unless the run's env
+  sets it, `WINEDEBUG=+seh,+loaddll,warn+file` (`runner::VERBOSE_WINEDEBUG`). Setting `WINEDEBUG`
+  replaces Proton's `PROTON_LOG` default channel set, which also traces every debug string and unwind.
+  `warn+file` logs each failed open as
+  `warn:file:NtCreateFile L"\\??\\Z:\\dir\\data3.bin" not found (c0000034)` [VL M19]. Proton writes
+  `steam-<SteamGameId>.log` (`steam-0.log`) there itself and sends Wine's stderr to it, not to umu-run's
+  pipes. umu prints the whole environment on stderr, which is why redaction runs on every line
+  (section 10). Proton Experimental `experimental-11.0-20261027b`: 35 to 75 KB for a small program in an
+  existing prefix.
 - Before spawning (`Invocation::preflight`): refuse if `geteuid() == 0`; validate user env; verify
   `exe_host` is a regular file and `cwd_host` a dir; verify the runtime still validates and has a
   wineserver. Failures (`Validation`, `NotFound`, `RuntimeInvalid`) become `diagnose` findings
@@ -311,7 +320,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- default_
 CREATE TABLE environments (
   id             INTEGER PRIMARY KEY,
   prefix_path    TEXT NOT NULL UNIQUE,          -- PrefixDir (WINEPREFIX)
-  prefix_managed INTEGER NOT NULL CHECK (prefix_managed IN (0,1)),  -- 1 = Vortex created it
+  prefix_managed INTEGER NOT NULL CHECK (prefix_managed IN (0,1)),  -- 1 = Vortex created it in data/prefixes
   runtime_path   TEXT NOT NULL,                 -- absolute Proton dir (PROTONPATH)
   created_at     INTEGER NOT NULL
 );
@@ -423,6 +432,12 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
   signal exit), `MissingInstallerData` (source vanished, file-not-found lines naming a source file),
   `WrongWorkingDirectory` (Likely only: relative-path not-found with cwd != exe dir), `Unknown`.
   Patterns live in one table in `diagnose.rs` and are tested against real log excerpts from M1.
+- Verbose runs: Proton's log is written by Proton, not by `LogWriter`. The supervisor rewrites it
+  through `logs::redact` (`logs::redact_file`) before `Finished`. The log viewer redacts every line
+  again when it shows a file. `diagnose::missing_files` reads only the failed-open lines of that log
+  (never `classify`'s patterns: its header has lines like `pressure-vessel: <version>`). It names files
+  under the run's `cwd_win`, leaves out `.dll/.drv/.manifest/.local/.config/.mui` probes, and only for a
+  failed run: `MissingInstallerData` (install) or `MissingFile` (other kinds), Likely.
   Nothing is reported as Confirmed unless the evidence is unambiguous (spec 10, last line).
 
 ## 11. Security rules (spec 12)
@@ -440,7 +455,16 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
    inside a managed root (`data/prefixes`, `data/runtimes`, `data/backups`, `data/logs`) or (b) a
    recorded `install_dir` with `install_dir_managed=1`; and it is not `/`, `$HOME`, a managed root
    itself, or an ancestor of another environment's prefix or install dir. The original installer
-   source is never in a plan. `std::fs::remove_dir_all` does not follow symlinks (prefixes contain
+   source is never in a plan. A `prefix_managed=0` prefix is never an item; when its environment is
+   removed it is listed in the plan's `manual` (shown as "Vortex will NOT delete").
+   Custom locations (M21, spec 4): the wizard may create a prefix outside `data/prefixes`
+   (`paths::check_prefix_location`: empty or missing dir, parent exists and is writable, not `/` or
+   `$HOME`, not inside `data/`, not inside or around a known prefix). It is recorded
+   `prefix_managed=0`: Vortex created it, but a user-chosen location is outside every managed root,
+   so rule (a) cannot vouch for it and deletion stays limited to `data/prefixes`. Likewise a missing
+   install dir outside `data/games` is created (`paths::new_dir_location`) with
+   `install_dir_managed=0`. Restore refuses targets outside `data/prefixes`, so such a prefix can be
+   backed up but not restored. `std::fs::remove_dir_all` does not follow symlinks (prefixes contain
    `dosdevices/z: -> /`); tests assert that a symlink to an outside dir survives deletion.
 6. Backups: `tar::Builder` with `follow_symlinks(false)` (mandatory: `z:` -> `/`). Restore unpacks into
    `data/prefixes/.restore-<id>/`, rejects absolute paths, `..`, and entries written through a symlink,
@@ -453,7 +477,8 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
    images, no API key, no redirects followed, never when turned off or in offline mode.
 8. No secrets in logs (section 10). Vortex never writes to `~/.wine`, the user's Steam dirs, or any
    prefix it did not create, except when the user explicitly points an environment at it
-   (`prefix_managed=0`; never deleted by Vortex).
+   (`prefix_managed=0`; never deleted by Vortex), or chooses a custom location for a new prefix
+   (rule 5; also `prefix_managed=0`).
 9. No DRM/anti-cheat circumvention features.
 
 ## 12. Threading model

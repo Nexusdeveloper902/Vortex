@@ -75,7 +75,7 @@ pub fn run_exe(state: &Rc<AppState>, env_id: i64) {
             })
             .await;
             match res {
-                Some(Ok((h, rx))) => run_view::present(&s, "Run in this environment", h, rx),
+                Some(Ok((h, rx))) => run_view::present(&s, "Run in this environment", h, rx, None),
                 Some(Err(e)) => s.toast(&e.to_string()),
                 None => {}
             }
@@ -170,25 +170,7 @@ pub fn dependencies(state: &Rc<AppState>, env_id: i64) {
                 let (state, verbs, d2, name) =
                     (state.clone(), verbs.clone(), d2.clone(), v.name.clone());
                 b.connect_clicked(move |_| {
-                    let (state, verbs, d2, name) =
-                        (state.clone(), verbs.clone(), d2.clone(), name.clone());
-                    glib::spawn_future_local(async move {
-                        let (runs, db, paths) =
-                            (state.runs.clone(), state.db.clone(), state.paths.clone());
-                        let res = blocking(move || {
-                            winetricks::install_verb(&runs, &db, &paths, env_id, &name, &verbs)
-                        })
-                        .await;
-                        match res {
-                            Some(Ok(Some((h, rx)))) => {
-                                d2.close();
-                                run_view::present(&state, "Installing dependency", h, rx);
-                            }
-                            Some(Ok(None)) => state.toast("Already installed"),
-                            Some(Err(e)) => state.toast(&e.to_string()),
-                            None => {}
-                        }
-                    });
+                    install_dependency(&state, env_id, &name, &verbs, false, Some(d2.clone()));
                 });
                 row.add_suffix(&b);
             }
@@ -218,6 +200,40 @@ pub fn dependencies(state: &Rc<AppState>, env_id: i64) {
         );
         stack.add_named(&col, Some("list"));
         stack.set_visible_child_name("list");
+    });
+}
+
+/// Starts one winetricks verb and shows its run (closing `dialog` once it started). A failed
+/// run offers "Retry with verbose log".
+fn install_dependency(
+    state: &Rc<AppState>,
+    env_id: i64,
+    name: &str,
+    verbs: &std::sync::Arc<Vec<winetricks::Verb>>,
+    verbose: bool,
+    dialog: Option<adw::Dialog>,
+) {
+    let (state, name, verbs) = (state.clone(), name.to_string(), verbs.clone());
+    glib::spawn_future_local(async move {
+        let (runs, db, paths) = (state.runs.clone(), state.db.clone(), state.paths.clone());
+        let (n, v) = (name.clone(), verbs.clone());
+        let res =
+            blocking(move || winetricks::install_verb(&runs, &db, &paths, env_id, &n, &v, verbose))
+                .await;
+        match res {
+            Some(Ok(Some((h, rx)))) => {
+                if let Some(d) = dialog {
+                    d.close();
+                }
+                let s = state.clone();
+                let retry: Rc<dyn Fn()> =
+                    Rc::new(move || install_dependency(&s, env_id, &name, &verbs, true, None));
+                run_view::present(&state, "Installing dependency", h, rx, Some(retry));
+            }
+            Some(Ok(None)) => state.toast("Already installed"),
+            Some(Err(e)) => state.toast(&e.to_string()),
+            None => {}
+        }
     });
 }
 
@@ -349,6 +365,17 @@ pub fn logs_page(state: &Rc<AppState>, game_id: i64) {
             .subtitle(format!("{}{code}", run_state_label(r.state)))
             .activatable(true)
             .build();
+        // A verbose run also has Proton's own log next to the run log.
+        if let Some(p) = vortex_core::logs::proton_log(std::path::Path::new(&r.log_path)) {
+            let b = gtk4::Button::builder()
+                .label("Proton log")
+                .tooltip_text("Verbose log written by Proton for this run")
+                .valign(gtk4::Align::Center)
+                .build();
+            let (state, p) = (state.clone(), p.to_string_lossy().into_owned());
+            b.connect_clicked(move |_| log_viewer(&state, &p, "Proton log"));
+            row.add_suffix(&b);
+        }
         row.add_suffix(&gtk4::Image::from_icon_name("go-next-symbolic"));
         let (state, path, title) = (state.clone(), r.log_path.clone(), run_kind_label(r.kind));
         row.connect_activated(move |_| log_viewer(&state, &path, title));
@@ -408,11 +435,15 @@ fn log_viewer(state: &Rc<AppState>, path: &str, title: &str) {
     }
     let buf = view.buffer();
     glib::spawn_future_local(async move {
-        // The log is already redacted by core. Show at most the last 1 MiB.
+        // Run logs are redacted by core as they are written, Proton logs when the run ends;
+        // redact again here (a Proton log of a run still going is not). Last 1 MiB at most.
         let text = blocking(move || {
             std::fs::read(&p).map(|b| {
                 let s = b.len().saturating_sub(1 << 20);
-                String::from_utf8_lossy(&b[s..]).into_owned()
+                String::from_utf8_lossy(&b[s..])
+                    .lines()
+                    .map(|l| vortex_core::logs::redact(l).into_owned() + "\n")
+                    .collect::<String>()
             })
         })
         .await;
@@ -451,7 +482,7 @@ pub fn run_uninstaller(state: &Rc<AppState>, game_id: i64, exe: std::path::PathB
                 })
                 .await;
                 match res {
-                    Some(Ok((h, rx))) => run_view::present(&s, "Uninstaller", h, rx),
+                    Some(Ok((h, rx))) => run_view::present(&s, "Uninstaller", h, rx, None),
                     Some(Err(e)) => s.toast(&e.to_string()),
                     None => {}
                 }

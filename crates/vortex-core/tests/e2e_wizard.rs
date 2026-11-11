@@ -163,6 +163,7 @@ impl World {
                 runtime: self.proton.clone(),
                 install_dir: None,
                 prefix: None,
+                args: Vec::new(),
             })
             .unwrap()
     }

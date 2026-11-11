@@ -175,6 +175,7 @@ impl T {
             runtime: self.runtime.clone(),
             install_dir: None,
             prefix: None,
+            args: Vec::new(),
         }
     }
 
@@ -602,6 +603,50 @@ fn msi_runs_through_msiexec_with_windows_path() {
         t.db().get_install(s.install_id).unwrap().source_kind,
         vortex_core::db::SourceKind::File
     );
+}
+
+#[test]
+fn msi_args_follow_the_file_exact_argv() {
+    let Some(t) = fake() else { return };
+    let dir = t.root.join("msi args");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Game.msi"), "x").unwrap();
+    let msi = HostPath::new(dir.join("Game.msi")).unwrap();
+    let mut req = t.req("MsiArgs", &msi, "unused");
+    req.installer = msi.clone();
+    req.args = vortex_core::install::split_args("/qn INSTALLDIR=\"C:\\My Games\"").unwrap();
+    let s = t.inst.begin(req).unwrap();
+    drive(&s.events, LIMIT, |_| {});
+    let rec = std::fs::read_to_string(dir.join(".fake-rec")).unwrap();
+    let win = format!("Z:{}", msi.as_path().display()).replace('/', "\\");
+    assert_eq!(
+        rec,
+        format!(
+            "cwd={}\narg=C:\\windows\\system32\\msiexec.exe\narg=/i\narg={win}\narg=/qn\narg=INSTALLDIR=C:\\My Games\n",
+            dir.display()
+        )
+    );
+}
+
+#[test]
+fn exe_args_are_stored_and_reused_by_retry() {
+    let Some(t) = fake() else { return };
+    let src = t.source("args src", "exit:3");
+    let mut req = t.req("ExeArgs", &src, "setup.exe");
+    req.args = vec!["/S".into(), "/D=a b".into()];
+    let s = t.inst.begin(req).unwrap();
+    drive(&s.events, LIMIT, |_| {});
+    let dir = src.as_path().display();
+    let want = format!("cwd={dir}\narg={dir}/setup.exe\narg=/S\narg=/D=a b\n");
+    let rec = || std::fs::read_to_string(src.as_path().join(".fake-rec")).unwrap();
+    assert_eq!(rec(), want);
+    assert_eq!(
+        t.db().get_install(s.install_id).unwrap().installer_args,
+        r#"["/S","/D=a b"]"#
+    );
+    std::fs::remove_file(src.as_path().join(".fake-rec")).unwrap();
+    drive(&t.inst.retry(s.install_id, false).unwrap(), LIMIT, |_| {});
+    assert_eq!(rec(), want);
 }
 
 #[test]
@@ -1092,6 +1137,7 @@ fn it_multi_file_installer_full_state_machine() {
             runtime: HostPath::new(&proton).unwrap(),
             install_dir: None,
             prefix: None,
+            args: Vec::new(),
         })
         .unwrap();
     let pfx = paths.managed_prefix(s.env_id).unwrap();

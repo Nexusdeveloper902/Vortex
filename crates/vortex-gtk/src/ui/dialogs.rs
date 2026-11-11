@@ -117,9 +117,12 @@ pub fn finding_text(f: &Finding) -> String {
         Confidence::Confirmed => "confirmed",
         Confidence::Likely => "likely",
     };
+    let hint = vortex_core::diagnose::finding_verb(f)
+        .map(|v| format!("\nSuggested dependency: {v}"))
+        .unwrap_or_default();
     match f.evidence.first() {
-        Some(e) => format!("{what} ({conf})\n{e}"),
-        None => format!("{what} ({conf})"),
+        Some(e) => format!("{what} ({conf})\n{e}{hint}"),
+        None => format!("{what} ({conf}){hint}"),
     }
 }
 

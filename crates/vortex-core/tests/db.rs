@@ -17,6 +17,7 @@ fn seed(db: &mut Db) -> (i64, i64, i64) {
             source_path: "/s".into(),
             source_kind: SourceKind::Dir,
             installer_path: "/s/setup.exe".into(),
+            installer_args: "[]".into(),
         })
         .unwrap();
     db.set_install_state(inst, InstallState::Running, None, None)
@@ -40,7 +41,7 @@ fn new_run(env: i64, game: i64, inst: i64, marker: &str) -> NewRun {
 fn fresh_db_is_current_with_fk_and_wal() {
     let tmp = tempfile::tempdir().unwrap();
     let (_, db) = open(&tmp);
-    assert_eq!(db.user_version().unwrap(), 3);
+    assert_eq!(db.user_version().unwrap(), 4);
     // FK enforced: game with unknown environment is rejected.
     assert!(db.insert_game(&NewGame::new("x", 99)).is_err());
 }

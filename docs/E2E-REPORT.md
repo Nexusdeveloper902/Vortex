@@ -241,7 +241,7 @@ These flows were observed on screen and also checked in the DB, on disk or in th
 | Destructive operations confirmed | PASS | GUI [24](screenshots/24-deletion-plan.png), [27](screenshots/27-restore-confirm.png), [22](screenshots/22-quit-guard.png) |
 | Failed launches give accessible diagnostics | PASS (with #21) | scenario 8a; GUI [18](screenshots/18-launch-failed-diagnosis.png) |
 | Runtime and install errors distinguishable | PASS | RuntimeInvalid vs InstallerFailure vs AppCrash |
-| Missing resources and wrong cwd diagnosable | PARTIAL | missing `data3.bin` gives InstallerFailure with exit 3 and a readable log, but no finding names the missing file, because the installer printed nothing. The cwd is logged in the run header and is always correct by construction. |
+| Missing resources and wrong cwd diagnosable | PASS (after M19, with a verbose retry) | A normal run of an installer missing `data3.bin` gives InstallerFailure with exit 3 and a readable log, but no finding names the file, because the installer prints nothing. "Retry with verbose log" (M19) turns on `WINEDEBUG=warn+file`, and the failed run then names it. Verified on Proton Experimental `experimental-11.0-20261027b`: `it_wizard_missing_part` (verbose retry: MissingInstallerData, `not found (verbose log): Z:\...\Lantern Hollow (incomplete)\setup_lantern_hollow-2.bin`) and `it_verbose_launch_names_the_missing_data_file` (MissingFile, `...\game dir\data3.bin`). The M14 `e2e.rs` multi-file installer itself was not re-run. The cwd is logged in the run header and is always correct by construction. |
 
 ## Bugs found
 
@@ -314,7 +314,7 @@ VORTEX_IT_PROTON="$HOME/.local/share/Steam/steamapps/common/Proton - Experimenta
 | b | Install, wait for the prereq and wineserver | PASS | The trace shows every page and every press in order (welcome next, license `next-ignored` while unticked, accept-on, next, install, finish). `next_enabled_before_accept=0`. `/finalize` wrote its file before SelectExe. Source tree hash is unchanged. The only exe candidate is `C:\Games\Lantern Hollow\LanternHollow.exe`. |
 | c | Launch | PASS | Exit 0, data verified, `save.dat` written, cwd is the game folder |
 | d | Game's uninstaller (the GUI's `launch::run_uninstaller`) | PASS (after #38) | Vortex lists the `%TEMP%\_lhXXXX.tmp /SECONDPHASE=...` copy and finishes only after phase 2. The install dir and the HKLM key are gone and `save.dat` is kept. The deletion plan then covers exactly the prefix. |
-| e | Missing `-2.bin` | PASS, diagnosis PARTIAL | Exit 3, InstallerFailure finding. The installer's own message names `setup_lantern_hollow-2.bin`, but no Vortex finding does, because Wine message boxes don't reach the log. Same limitation as M14 spec 18. |
+| e | Missing `-2.bin` | PASS (diagnosis after M19) | Exit 3, InstallerFailure finding. The installer's own message names `setup_lantern_hollow-2.bin`, but the first run's findings don't, because Wine message boxes don't reach the log. M19: the verbose retry in the same test gives a MissingInstallerData finding that names `...\Lantern Hollow (incomplete)\setup_lantern_hollow-2.bin`, from Proton's `warn:file:NtCreateFile ... not found (c0000034)` line. |
 | f | Cancel | PASS | Exit 2, InstallerFailure (Code 2), game not installed |
 
 Audio (installers muted with `WINEDLLOVERRIDES=winepulse.drv,winealsa.drv,wineoss.drv=d`, #37):

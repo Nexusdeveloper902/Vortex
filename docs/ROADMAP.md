@@ -272,6 +272,24 @@ marked PASS / FAIL / NOT RUN with evidence.
   reported only if actually run.
 - Deps: all.
 
+## M19: Verbose log retry (opus)
+
+Spec 10 "Proton output" and E2E review finding F4 (a failed installer could not name the missing
+file). `RunSpec::verbose` fills `Invocation::verbose_log_dir` with a per-run dir next to the run log;
+`Installs::retry`, `launch::launch_game` and `winetricks::install_verb` take `verbose`. Proton's log
+is redacted in place when the run ends; `diagnose::missing_files` names the files a failed verbose run
+could not open (`WINEDEBUG=warn+file`). GTK: "Retry with verbose log" on a failed install, launch and
+dependency run; a **Proton log** button in Logs.
+
+- Owns: `runner.rs`, `process.rs` (verbose dir and redaction only), `logs.rs` (Proton log helpers),
+  `diagnose.rs` (`missing_files`, `Class::MissingFile`), the `verbose` parameter in `install.rs`,
+  `launch.rs`, `winetricks.rs`, the retry buttons in `install_wizard.rs`, `run_view.rs`,
+  `game_page.rs`, `manage.rs`, the `protonlog` step of `tests/fake-umu-run`.
+- Acceptance: fake-umu tests show the env (`PROTON_LOG=1`, `PROTON_LOG_DIR`, `UMU_LOG=debug`,
+  `WINEDEBUG`) only on verbose runs, with the Proton log in the managed logs dir, redacted, and the
+  missing file named (`tests/launch.rs`, `tests/install.rs`). Real Proton: `it_verbose_launch_names_the_missing_data_file`
+  and `it_wizard_missing_part` (verbose retry names `setup_lantern_hollow-2.bin`).
+
 ## Top risks (details: ARCHITECTURE section 14)
 
 1. Completion detection for detached/delayed second-stage installers (S1-S3). Mitigated by the

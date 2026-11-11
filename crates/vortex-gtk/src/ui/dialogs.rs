@@ -55,7 +55,10 @@ pub fn format_plan(plan: &DeletionPlan) -> String {
         out.push_str(&format!("\n\nTotal: {}\n", human_size(total)));
     }
     if plan.remove_env {
-        out.push_str("\nThe Wine prefix of this game is removed too, unless it is listed below.\n");
+        // With nothing to delete there is no list above; a kept prefix is listed below.
+        if !plan.items.is_empty() {
+            out.push_str("\nThe game's Wine prefix is deleted only if it is listed above.\n");
+        }
     } else {
         out.push_str("\nThe prefix is shared with other games and is kept.\n");
     }
@@ -480,7 +483,18 @@ mod tests {
         assert!(t.contains("Total: 2.0 KiB"));
         assert!(t.contains("NOT delete"));
         assert!(t.contains("/home/u/Games/x"));
-        assert!(t.contains("prefix of this game is removed"));
+        assert!(t.contains("prefix is deleted only if it is listed above"));
+
+        // nothing to delete, custom prefix kept: no claim that anything is removed (M23 shot 44)
+        let plan = DeletionPlan {
+            items: vec![],
+            manual: vec![hp("/home/u/my-wine")],
+            ..plan
+        };
+        let t = format_plan(&plan);
+        assert!(t.contains("No files will be deleted"));
+        assert!(t.contains("NOT delete") && t.contains("/home/u/my-wine"));
+        assert!(!t.contains("removed too") && !t.contains("deleted only if"), "{t}");
     }
 
     #[test]

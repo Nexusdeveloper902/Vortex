@@ -179,8 +179,17 @@ Command::new(tools.umu_run)                // default: "umu-run" resolved on PAT
 - Installer EXE: program = `exe_host`, `cwd_host` = installer's parent. MSI:
   `C:\windows\system32\msiexec.exe /i <exe_win> /qn?`, `cwd_host` = msi's parent (so
   `STEAM_COMPAT_INSTALL_PATH` = msi's parent). `Z:\` paths install [VL M1 S7, M7]; a missing MSI gives 2.
-- Verbose mode (per-run toggle): `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=<run log dir>`.
-  umu then prints the whole environment, which is why redaction runs on every line (section 10).
+- Verbose mode (`RunSpec::verbose`, per run; the UI offers it as "Retry with verbose log"):
+  `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=logs/<owner>/<run_id>-<kind>.proton/` (next to
+  the run log, so `runs.log_path` links both; created 0700 before the spawn) and, unless the run's env
+  sets it, `WINEDEBUG=+seh,+loaddll,warn+file` (`runner::VERBOSE_WINEDEBUG`). Setting `WINEDEBUG`
+  replaces Proton's `PROTON_LOG` default channel set, which also traces every debug string and unwind.
+  `warn+file` logs each failed open as
+  `warn:file:NtCreateFile L"\\??\\Z:\\dir\\data3.bin" not found (c0000034)` [VL M19]. Proton writes
+  `steam-<SteamGameId>.log` (`steam-0.log`) there itself and sends Wine's stderr to it, not to umu-run's
+  pipes. umu prints the whole environment on stderr, which is why redaction runs on every line
+  (section 10). Proton Experimental `experimental-11.0-20261027b`: 35 to 75 KB for a small program in an
+  existing prefix.
 - Before spawning (`Invocation::preflight`): refuse if `geteuid() == 0`; validate user env; verify
   `exe_host` is a regular file and `cwd_host` a dir; verify the runtime still validates and has a
   wineserver. Failures (`Validation`, `NotFound`, `RuntimeInvalid`) become `diagnose` findings
@@ -423,6 +432,12 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
   signal exit), `MissingInstallerData` (source vanished, file-not-found lines naming a source file),
   `WrongWorkingDirectory` (Likely only: relative-path not-found with cwd != exe dir), `Unknown`.
   Patterns live in one table in `diagnose.rs` and are tested against real log excerpts from M1.
+- Verbose runs: Proton's log is written by Proton, not by `LogWriter`. The supervisor rewrites it
+  through `logs::redact` (`logs::redact_file`) before `Finished`. The log viewer redacts every line
+  again when it shows a file. `diagnose::missing_files` reads only the failed-open lines of that log
+  (never `classify`'s patterns: its header has lines like `pressure-vessel: <version>`). It names files
+  under the run's `cwd_win`, leaves out `.dll/.drv/.manifest/.local/.config/.mui` probes, and only for a
+  failed run: `MissingInstallerData` (install) or `MissingFile` (other kinds), Likely.
   Nothing is reported as Confirmed unless the evidence is unambiguous (spec 10, last line).
 
 ## 11. Security rules (spec 12)

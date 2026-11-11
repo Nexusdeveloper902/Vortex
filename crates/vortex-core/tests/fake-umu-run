@@ -11,6 +11,8 @@
 #   orphan:S   start `setsid sleep S` (inherits the marker env, holds no pipe) and record its pid
 #              in $WINEPREFIX/fake-wineserver.pid so the fake wineserver -w waits for it
 #   stray:S    like orphan but not known to the fake wineserver (outlives the barrier)
+#   protonlog  if $PROTON_LOG_DIR is set (verbose run), write steam-0.log there like Proton does:
+#              a token line and a WINEDEBUG=warn+file "not found" line for $PWD/data3.bin
 #   trap       ignore SIGTERM and block (stop must escalate to SIGKILL)
 #   respawn:S  start a helper WITHOUT the marker that, for S seconds, starts a marked
 #              `sleep 0.5` every 0.05 s (marker processes that keep appearing after a stop, like
@@ -40,6 +42,13 @@ for step in ${FAKE_UMU_MODE:-exit:0}; do
         end=$(($(date +%s) + S))
         while [ "$(date +%s)" -lt "$end" ]; do VORTEX_RUN_ID=$M sleep 0.5 & sleep 0.05; done
       ' </dev/null >/dev/null 2>&1 & ;;
+    protonlog)
+      if [ -n "${PROTON_LOG_DIR:-}" ]; then
+        w=$(printf '%s' "$PWD" | sed 's#/#\\\\#g')
+        { echo "GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123"
+          printf '0138:warn:file:NtCreateFile L"\\\\??\\\\Z:%s\\\\data3.bin" not found (c0000034)\n' "$w"
+        } > "$PROTON_LOG_DIR/steam-0.log"
+      fi ;;
     trap) trap '' TERM; sleep 600 </dev/null >/dev/null 2>&1 & wait ;;
     *) echo "fake-umu-run: unknown mode step $step" >&2; exit 99 ;;
   esac

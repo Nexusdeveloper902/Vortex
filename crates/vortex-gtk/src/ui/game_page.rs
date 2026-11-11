@@ -10,7 +10,7 @@ use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
-use vortex_core::db::{Game, GameStatus, RunKind};
+use vortex_core::db::{Game, GameStatus, Run, RunKind};
 use vortex_core::paths::HostPath;
 use vortex_core::process::{Exit, Outcome, RunEvent, RunHandle, Runs};
 use vortex_core::winetricks;
@@ -103,6 +103,35 @@ pub fn open_and_play(state: &Rc<AppState>, id: i64) {
     }
 }
 
+fn last_launch_text(last: Option<&Run>) -> String {
+    last.map_or_else(
+        || "Never".to_string(),
+        |r| {
+            let when = glib::DateTime::from_unix_local(r.started_at)
+                .ok()
+                .and_then(|d| d.format("%x %H:%M").ok())
+                .map_or_else(|| r.started_at.to_string(), |s| s.to_string());
+            match r.exit_code {
+                Some(c) => format!("{when} (exit code {c})"),
+                None => when,
+            }
+        },
+    )
+}
+
+/// Re-reads the last launch into the page's "Last launch" row (it is built once with the page).
+fn update_last_launch(state: &Rc<AppState>, inside: &gtk4::Widget, id: i64) {
+    let Some(page) = inside.ancestor(adw::NavigationPage::static_type()) else {
+        return;
+    };
+    if let (Some(r), Ok(last)) = (
+        find_named(&page, "last-launch-row").and_downcast::<adw::ActionRow>(),
+        state.db().last_launch(id),
+    ) {
+        r.set_subtitle(&glib::markup_escape_text(&last_launch_text(last.as_ref())));
+    }
+}
+
 fn find_named(w: &gtk4::Widget, name: &str) -> Option<gtk4::Widget> {
     if w.widget_name() == name {
         return Some(w.clone());
@@ -151,20 +180,9 @@ fn build(state: &Rc<AppState>, id: i64) -> vortex_core::error::Result<adw::Navig
         "Environment variables",
         &or_none(format_env(&g.env_vars)),
     ));
-    let last_text = last.map_or_else(
-        || "Never".to_string(),
-        |r| {
-            let when = glib::DateTime::from_unix_local(r.started_at)
-                .ok()
-                .and_then(|d| d.format("%x %H:%M").ok())
-                .map_or_else(|| r.started_at.to_string(), |s| s.to_string());
-            match r.exit_code {
-                Some(c) => format!("{when} (exit code {c})"),
-                None => when,
-            }
-        },
-    );
-    launch.add(&row("Last launch", &last_text));
+    let last_row = row("Last launch", &last_launch_text(last.as_ref()));
+    last_row.set_widget_name("last-launch-row");
+    launch.add(&last_row);
     prefs.add(&launch);
 
     let view = adw::ToolbarView::new();
@@ -375,6 +393,7 @@ fn hero(state: &Rc<AppState>, g: &Game, env_id: i64) -> gtk4::Box {
                         mark.set_visible(false);
                         set_running(false);
                         sub.set_label(&label);
+                        update_last_launch(&state, sub.upcast_ref(), id);
                         if !o.stopped && !o.user_forced && o.exit != Some(Exit::Low8(0)) {
                             launch_failed(&state, id, run_id, &o, retry_verbose.clone());
                         } else {

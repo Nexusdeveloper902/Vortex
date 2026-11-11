@@ -320,7 +320,10 @@ fn activate(app: &adw::Application, slot: &Slot) {
         bp.add_setter(&split, "collapsed", Some(&true.to_value()));
         window.add_breakpoint(bp);
     }
-    let banner = dialogs::detached_banner(&state);
+    let banner = {
+        let (state2, library) = (state.clone(), library.clone());
+        dialogs::detached_banner(&state, move || library.refresh(&state2))
+    };
     let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     root.append(&banner);
     tool_banners(&state, &root, &side_list);

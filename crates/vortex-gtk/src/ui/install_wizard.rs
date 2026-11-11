@@ -399,13 +399,20 @@ impl Wizard {
         follow_name(&self.state, &name, &pfx, KEY_PREFIX_DIR);
         let advanced = adw::ExpanderRow::builder()
             .title("Advanced")
-            .subtitle("Where the Wine prefix is created")
+            .subtitle("Prefix location and installer arguments")
             .build();
         advanced.add_row(&pfx);
         let list = boxed();
         list.append(&name);
         list.append(&combo);
         list.append(&loc);
+        let args = adw::EntryRow::builder()
+            .title("Installer arguments (optional)")
+            .build();
+        args.set_tooltip_text(Some(
+            "e.g. /S or /qn. Quotes group words. Not run through a shell.",
+        ));
+        advanced.add_row(&args);
         list.append(&advanced);
         let skip = adw::SwitchRow::builder()
             .title("Don't look up artwork for this game")
@@ -442,6 +449,7 @@ impl Wizard {
                     runtime: rt,
                     install_dir: opt(&loc)?,
                     prefix: opt(&pfx)?,
+                    args: vortex_core::install::split_args(args.text().as_str())?,
                 })
             })();
             let req = match req {

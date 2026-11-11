@@ -350,11 +350,11 @@ fn v1_database_migrates() {
     };
     // Simulate a v1 file: drop the v2 table and version.
     let c = rusqlite_conn(&paths);
-    c.execute_batch("DROP TABLE artwork; PRAGMA user_version=1;")
+    c.execute_batch("DROP TABLE artwork; ALTER TABLE installs DROP COLUMN installer_args; PRAGMA user_version=1;")
         .unwrap();
     drop(c);
     let db = Db::open(&paths.db_file()).unwrap();
-    assert_eq!(db.user_version().unwrap(), 3);
+    assert_eq!(db.user_version().unwrap(), 4);
     assert_eq!(db.games_without_artwork().unwrap(), [id]);
     let mut bak = paths.db_file().into_os_string();
     bak.push(".bak-v1");

@@ -458,11 +458,23 @@ fn launch_failed(
     d.add_response("close", "Close");
     d.add_response("verbose", "Retry with verbose log");
     d.add_response("logs", "Show logs");
+    let verb = findings
+        .iter()
+        .find_map(vortex_core::diagnose::finding_verb)
+        .zip(state.db().get_game(game_id).ok().map(|g| g.environment_id));
+    if let Some((v, _)) = verb {
+        d.add_response("verb", &format!("Install {v}"));
+    }
     d.set_default_response(Some("logs"));
     d.set_close_response("close");
     let s = state.clone();
     d.connect_response(None, move |_, r| match r {
         "logs" => manage::logs_page(&s, game_id),
+        "verb" => {
+            if let Some((v, env)) = verb {
+                manage::install_suggested(&s, env, v);
+            }
+        }
         "verbose" => retry_verbose(),
         _ => {}
     });
@@ -576,7 +588,7 @@ fn overflow(
             })
             .collect(),
     };
-    let found = dialogs::find_uninstallers(&roots, 3);
+    let found = vortex_core::install::find_uninstallers(&roots, 3);
     let group = gio::SimpleActionGroup::new();
     let un = gio::SimpleAction::new("uninstaller", None);
     un.set_enabled(g.status == GameStatus::Installed && !found.is_empty());

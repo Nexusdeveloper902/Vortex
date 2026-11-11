@@ -52,6 +52,7 @@ File ownership (a milestone edits only its files; anything else goes to a separa
 | M14 | `docs/E2E-REPORT.md`, fixes via small follow-up PRs |
 | M22 | `artwork.rs`, `migrations/0003_artwork_candidates.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/artwork_search.rs`; tiny edits to `db.rs`, `game_page.rs`, `install_wizard.rs` |
 | M23 | `docs/E2E-REPORT.md` (M23 section), `docs/screenshots/walkthrough/**`, small fixes in `vortex-gtk` |
+| M24 | `packaging/smoke.sh`, `packaging/make-tarball.sh`, `.github/workflows/release.yml`, `README.md`, `docs/RELEASING.md` |
 | M17 | `artwork.rs`, `migrations/0002_artwork.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/cover.rs`; small edits to `paths.rs`, `db.rs` (appended), `delete.rs` (remove cover with the game), `library.rs`, `game_page.rs`, `settings.rs`, `game_object.rs` |
 
 `db.rs`: M2 implements typed queries for the entire v1 schema. Later milestones that need another
@@ -287,6 +288,28 @@ marked PASS / FAIL / NOT RUN with evidence.
   requests, custom image set/remove, cover deleted with the game, v1 DB migrates. `real_steam_lookup`
   (`--ignored`, network). Manual: covers appear in grid, list and game page.
 
+## M26: Diagnostics hints, Logs coverage, installer arguments
+
+- Scope: `diagnose::suggested_verb`/`finding_verb` map well-known DLLs to winetricks verbs; the
+  launch-failure dialog offers "Install <verb>" (validated winetricks flow). Logs page lists
+  game-less runs of the environment (`Db::runs_for_environment`, already covered by tests). Optional
+  installer arguments (`InstallRequest::args`, `install::split_args`, `installs.installer_args`,
+  migration 0004), appended after the exe or after `msiexec /i <file>`, reused by retry.
+- Files: `diagnose.rs`, `install.rs`, `db.rs`, `migrations/0004*`, `vortex-gtk` dialogs/manage/game_page/install_wizard, docs.
+- Acceptance: `dll_to_verb`, `split_tests`, `tests/install.rs` `msi_args_*` / `exe_args_*` (exact argv via FAKE_UMU_OUT), `runs_for_environment_includes_gameless_runs`.
+
+## M25: Cleanup tools: backups, runtimes, logs
+
+- Scope: delete backups (Restore dialog), remove Vortex-downloaded runtimes (Runtimes page; refused when
+  in use or outside `runtimes/`), startup log retention (newest 20 runs per game, never running ones).
+  Details: ARCHITECTURE section 10.
+- Files: `delete.rs`, `logs.rs`, `db.rs` (`all_runs`), `vortex-gtk/src/{app.rs,ui/manage.rs,ui/runtimes.rs}`,
+  docs; tests in `tests/cleanup.rs`.
+- Deps: M17 (backups), runtimes page.
+- Acceptance: `tests/cleanup.rs` (delete backup removes file + row, outside-dir refused, symlink removed
+  as link, runtime in use / outside refused, runtime symlink target untouched, log prune keeps newest N
+  and running).
+
 ## M22: Careful artwork matching and pick dialog
 
 - Scope: `clean_query` strips build/edition/platform noise from the search term; matching ignores
@@ -299,6 +322,17 @@ marked PASS / FAIL / NOT RUN with evidence.
   "Dark Souls 3 dev build" finds "DARK SOULS III" via the cleaned query, ambiguous records candidates
   and attaches nothing, pick by app id, opt-out and installing games make zero requests;
   `real_steam_dark_souls_3_dev_build` (`--ignored`, network) -> app 374320.
+
+## M24: Package install smoke tests
+
+- Scope: `packaging/smoke.sh` installs each built package in its target distro container and checks
+  `ldd` has no `not found`, `.desktop`/metainfo/icons exist, `desktop-file-validate` and
+  `appstreamcli validate --no-net`, and that the binary (non-root, no display) fails with GTK's
+  "Failed to open display" and no loader/symbol error. `release.yml` job `smoke` runs it and
+  `publish` needs it. Tarball INSTALL.txt/README no longer ask for host winetricks.
+- Files: see the ownership table. Deps: M13.
+- Acceptance: the script passes against the v0.4.0 assets on debian:trixie, ubuntu:25.04,
+  fedora:latest, archlinux (tarball) and debian:trixie (tarball); the PR records results.
 
 ## M18: First-run tool check (sonnet)
 

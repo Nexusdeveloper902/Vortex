@@ -28,6 +28,16 @@ fix this file in the same PR that changes the pipeline.
      `cargo deb -p vortex-gtk --locked` → `vortex-launcher_X.Y.Z-1_amd64.deb`.
    - `rpm`: `fedora:latest` container, `cargo generate-rpm -p crates/vortex-gtk` →
      `vortex-launcher-X.Y.Z-1.x86_64.rpm`.
+   - `smoke`: after the three builds, `packaging/smoke.sh` runs in a matrix of containers
+     (debian:trixie and ubuntu:25.04 with the deb, fedora:latest with the rpm, archlinux and
+     debian:trixie with the tarball): installs the package, checks `ldd` has no `not found`, that
+     `.desktop`, metainfo and icons are installed and validate, and that the binary run as non-root
+     without a display exits with GTK's "Failed to open display" and no loader/symbol error.
+     `publish` needs it, so a failure leaves the release a draft. A failure means the package is
+     broken on that distro (missing dependency, glibc/GTK too new for the target, missing file):
+     fix in a normal PR and cut a patch release. Run it locally with
+     `docker run --rm -v DIR:/pkg:ro -v $PWD/packaging/smoke.sh:/smoke.sh:ro IMAGE sh /smoke.sh KIND /pkg`
+     (KIND is `deb`, `rpm`, `tar` or `tar-debian`).
    - `publish`: downloads the three, writes `sha256sums.txt`, creates a build provenance
      attestation (`actions/attest-build-provenance`), runs `gh release upload --clobber`, and
      only then publishes the draft (`gh release edit vX.Y.Z --draft=false`). So a public release
@@ -86,7 +96,7 @@ draft or not), then publishes it.
 
 | Asset | Built on | Target | Name / binary |
 |---|---|---|---|
-| tarball | Arch (latest) | recent glibc, GTK ≥ 4.14, libadwaita ≥ 1.6 | `bin/vortex-launcher` |
+| tarball | Arch (latest) | glibc ≥ 2.41 (verified on Debian 13), GTK ≥ 4.14, libadwaita ≥ 1.6 | `bin/vortex-launcher` |
 | .deb | Debian 13 trixie | Debian 13+, Ubuntu 25.04+ | `vortex-launcher`, `/usr/bin/vortex-launcher` |
 | .rpm | Fedora latest | Fedora | `vortex-launcher`, `/usr/bin/vortex-launcher` |
 | PKGBUILD (not published) | user's machine | Arch | `vortex-launcher-git`, `/usr/bin/vortex-launcher` |

@@ -358,6 +358,7 @@ fn every_install_source_is_protected() {
         source_path: other_src.to_str().unwrap().into(),
         source_kind: SourceKind::Dir,
         installer_path: other_src.join("setup.exe").to_str().unwrap().into(),
+        installer_args: "[]".into(),
     })
     .unwrap();
     // a games-root install dir that contains another game's installer source
@@ -368,6 +369,7 @@ fn every_install_source_is_protected() {
         source_path: d.join("inst").to_str().unwrap().into(),
         source_kind: SourceKind::Dir,
         installer_path: d.join("inst/setup.exe").to_str().unwrap().into(),
+        installer_args: "[]".into(),
     })
     .unwrap();
     let g = game_with_dir(&db, &paths, &d);

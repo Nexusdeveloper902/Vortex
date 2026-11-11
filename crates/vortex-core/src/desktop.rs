@@ -44,6 +44,50 @@ pub fn remove_entry(paths: &Paths, game_id: &str) -> Result<()> {
     }
 }
 
+/// Points every Vortex-written per-game entry in the applications dir at `vortex`. Only files named
+/// `<APP_ID>.game-<id>.desktop` are touched, and only their `Exec=` line, and only when it differs
+/// (binary renamed, tarball vs package). Returns how many entries were rewritten.
+pub fn refresh_entries(paths: &Paths, vortex: &Path) -> Result<usize> {
+    let dir = paths.applications_dir();
+    let rd = match fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(Error::io(dir)(e)),
+    };
+    let program = vortex
+        .to_str()
+        .ok_or_else(|| invalid("vortex path", "not UTF-8"))?;
+    let prefix = format!("{APP_ID}.game-");
+    let mut n = 0;
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(id) = name
+            .strip_prefix(&prefix)
+            .and_then(|r| r.strip_suffix(".desktop"))
+        else {
+            continue;
+        };
+        if check_game_id(id).is_err() || !e.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        let path = e.path();
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let want = format!("Exec={}", exec_value(program, &["--launch", id])?);
+        if text.lines().any(|l| l == want) || !text.lines().any(|l| l.starts_with("Exec=")) {
+            continue;
+        }
+        let out: String = text
+            .lines()
+            .map(|l| if l.starts_with("Exec=") { &want } else { l })
+            .fold(String::new(), |a, l| a + l + "\n");
+        write_atomic(&path, out.as_bytes())?;
+        n += 1;
+    }
+    Ok(n)
+}
+
 fn entry_path(dir: &Path, game_id: &str) -> PathBuf {
     dir.join(format!("{APP_ID}.game-{game_id}.desktop"))
 }
@@ -294,5 +338,37 @@ mod tests {
             .is_err()
         );
         assert_eq!(fs::read_dir(&tmp.0).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn refresh_rewrites_only_stale_vortex_entries() {
+        let tmp = TempDir::new("refresh");
+        let p = paths(&tmp);
+        let old = write_entry(&p, Path::new("/old/vortex"), "1", "Old").unwrap();
+        let cur = write_entry(&p, Path::new("/new/vortex-launcher"), "2", "Cur").unwrap();
+        let other = p.applications_dir().join("other.desktop");
+        fs::write(&other, "[Desktop Entry]\nExec=/old/vortex\n").unwrap();
+        let before = fs::read_to_string(&cur).unwrap();
+        assert_eq!(
+            refresh_entries(&p, Path::new("/new/vortex-launcher")).unwrap(),
+            1
+        );
+        let text = fs::read_to_string(&old).unwrap();
+        assert!(
+            text.contains("Exec=/new/vortex-launcher --launch 1\n"),
+            "{text}"
+        );
+        assert!(text.contains("Name=Old\n") && text.contains("X-Vortex-Game-Id=1\n"));
+        assert_eq!(fs::read_to_string(&cur).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(&other).unwrap(),
+            "[Desktop Entry]\nExec=/old/vortex\n"
+        );
+        assert_eq!(
+            refresh_entries(&p, Path::new("/new/vortex-launcher")).unwrap(),
+            0
+        );
+        let none = Paths::under(tmp.0.join("never-created"));
+        assert_eq!(refresh_entries(&none, Path::new("/x")).unwrap(), 0);
     }
 }

@@ -18,6 +18,10 @@ Vortex is not affiliated with Valve, Lutris or Bottles.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): modules, path kinds, the umu-run contract, the process
   lifecycle, the data schema and the security rules.
 - [`spec.md`](spec.md): the product specification.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): build, test and PR checklist.
+- [`SECURITY.md`](SECURITY.md): how to report a vulnerability privately.
+
+Found a bug or have an idea? Use the [issue templates](../../issues/new/choose).
 
 ## Install
 
@@ -25,18 +29,20 @@ Download from the [latest release](https://github.com/Nexusdeveloper902/Vortex/r
 (`sha256sums.txt` and GitHub build provenance attestations are attached):
 
 - `vortex-launcher-X.Y.Z-x86_64-linux.tar.gz`: generic binary tarball (see `INSTALL.txt` inside).
+  Built on Arch and smoke-tested on Debian 13 (glibc 2.41, GTK 4.14, libadwaita 1.6), its practical minimum.
 - `.deb`: Debian 13 (trixie) or newer, Ubuntu 25.04 or newer. Older releases ship GTK or libadwaita
   too old (GTK 4.14 and libadwaita 1.6 are required).
 - `.rpm`: Fedora.
 - Arch Linux: build the `vortex-launcher-git` package from [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD).
 
-`umu-launcher` and `winetricks` are not pulled in by the `.deb`/`.rpm`; install them separately.
+`umu-launcher` is not pulled in by the `.deb`/`.rpm`; install it separately. Winetricks comes from the
+runtime via `umu-run`; no host `winetricks` is needed.
 
 ## Requirements
 
 Arch Linux packages:
 
-- Runtime: `gtk4`, `libadwaita`, `sqlite`, `umu-launcher` and `winetricks`.
+- Runtime: `gtk4`, `libadwaita`, `sqlite` and `umu-launcher`.
   `umu-launcher` is in the `multilib` repository, so enable `multilib` in `/etc/pacman.conf`.
 - Build: Rust 1.92 or newer (edition 2024) with `cargo`, and the GTK, libadwaita and SQLite development
   files (the packages above).
@@ -46,7 +52,7 @@ Arch Linux packages:
   See the [user guide](docs/USER.md#runtimes).
 
 ```sh
-sudo pacman -S --needed rust gtk4 libadwaita sqlite umu-launcher winetricks
+sudo pacman -S --needed rust gtk4 libadwaita sqlite umu-launcher
 # optional, for the real integration tests
 sudo pacman -S --needed mingw-w64-gcc msitools
 ```

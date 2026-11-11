@@ -10,10 +10,10 @@ install -Dm644 data/io.github.nexusdeveloper902.Vortex.metainfo.xml -t "$d/share
 cp -r data/icons "$d/share/icons"
 install -m644 LICENSE README.md "$d/"
 cat > "$d/INSTALL.txt" <<'TXT'
-Vortex (vortex-launcher) binary tarball (x86_64, built on Arch Linux: needs a recent glibc, GTK 4.14+, libadwaita 1.6+, SQLite).
+Vortex (vortex-launcher) binary tarball (x86_64, built on Arch Linux: verified on Debian 13 trixie, i.e. glibc 2.41+, GTK 4.14+, libadwaita 1.6+, SQLite).
 Install for the current user:   cp -r bin share ~/.local/
 Install system-wide (as root):  cp -r bin share /usr/local/
-umu-launcher and winetricks must be installed separately. Run Vortex as a normal user, never as root.
+Only umu-launcher must be installed separately (Vortex uses the runtime's own winetricks through it). Run Vortex as a normal user, never as root.
 TXT
 tar czf "$d.tar.gz" "$d"
 rm -rf "$d"

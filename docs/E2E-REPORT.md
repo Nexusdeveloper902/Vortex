@@ -257,8 +257,7 @@ These flows were observed on screen and also checked in the DB, on disk or in th
 - Exit codes are 8 bits under umu, so a crash shows up as exit 5 (0xC0000005 & 0xff). A real program
   that exits 5 on purpose is also reported as a "Likely" AppCrash. Wine's crash text does not reach the log.
 - Winetricks only works on GE-Proton or UMU-Proton. Proton Experimental is refused by design.
-- The Logs page lists runs with a `game_id`. "Run EXE" and winetricks runs (no game) are in the log
-  directory but not on the page.
+- (Fixed in M26: the Logs page also lists runs without a game, `runs_for_environment`.)
 - The quit guard calls an exec run "a program", not by its exe name.
 - The dependency run view keeps its process list after the run ends.
 - The e2e suite takes about 5 minutes and downloads GE-Proton unless `VORTEX_IT_GE` is set.
@@ -363,14 +362,15 @@ installer and uninstaller audio (unit test per run kind, and the audio table abo
 
 ## Observations (not fixed)
 
-- After a cancelled prefix init, the wizard still says "The installer finished: choose the
-  executable" next to Retry.
+- After a cancelled prefix init, the wizard still said "The installer finished: choose the
+  executable" next to Retry. Fixed in [#42](https://github.com/Nexusdeveloper902/Vortex/pull/42).
 - With `HOME` set to an empty directory, Proton's `steam.exe` aborts during wineboot
   (lsteamclient `steamclient_main.c:375 "!status"`). The GUI demo used the real `HOME` and
   isolated XDG dirs.
 - Fixture cosmetic issue: the Welcome page body text is clipped.
-- `tests/launch.rs` leaves two small wrapper scripts in `$TMPDIR` per run (`vortex-m10-wt-PID`,
-  `vortex-m16-rec-PID`), because they live in a static that is never dropped.
+- `tests/launch.rs` left two small wrapper scripts in `$TMPDIR` per run (`vortex-m10-wt-PID`,
+  `vortex-m16-rec-PID`), because they lived in a static that is never dropped. Fixed in
+  [#43](https://github.com/Nexusdeveloper902/Vortex/pull/43).
 - Wine checkboxes ignore a synthetic click that has no hold between press and release.
 
 ## M23 GUI walkthrough (release build, isolated XDG dirs, Hyprland)

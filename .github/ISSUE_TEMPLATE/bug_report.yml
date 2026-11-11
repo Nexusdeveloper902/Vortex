@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in Vortex does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste secrets.** Use the exported (redacted) log from the game's log page, and
+        skim it before posting. Never paste tokens, passwords, keys or your full environment.
+  - type: input
+    id: version
+    attributes:
+      label: Vortex version
+      description: Release version, or commit if built from source.
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop environment and session (GNOME/KDE/..., Wayland/X11)
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime (Proton version) and umu-launcher version
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Include steps to reproduce.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Exported log (redacted)
+      render: text

@@ -53,6 +53,38 @@ pub struct InstallRequest {
     /// `data/prefixes/<env id>`. A custom prefix is created by Vortex but recorded
     /// `prefix_managed = 0`, so it is never deleted by Vortex.
     pub prefix: Option<HostPath>,
+    /// Extra installer arguments (advanced), passed as argv, never through a shell: after the
+    /// installer exe, or after `msiexec /i <file>` for an MSI. Stored for retries.
+    pub args: Vec<String>,
+}
+
+/// Splits a user-typed argument line: whitespace separates, `"..."` or `'...'` group (quotes are
+/// dropped, no escapes). An unterminated quote is an error. Never run through a shell.
+pub fn split_args(line: &str) -> Result<Vec<String>> {
+    let (mut out, mut cur, mut q, mut any) = (Vec::new(), String::new(), None, false);
+    for c in line.chars() {
+        match (q, c) {
+            (Some(k), c) if c == k => q = None,
+            (Some(_), c) => cur.push(c),
+            (None, '"' | '\'') => (q, any) = (Some(c), true),
+            (None, c) if c.is_whitespace() => {
+                if any {
+                    out.push(std::mem::take(&mut cur));
+                    any = false;
+                }
+            }
+            (None, c) => (cur.push(c), any = true).1,
+        }
+    }
+    if q.is_some() {
+        return Err(Error::Validation(
+            "unterminated quote in the installer arguments".into(),
+        ));
+    }
+    if any {
+        out.push(cur);
+    }
+    Ok(out)
 }
 
 /// A possible game exe found after the installer finished. The user always confirms or browses.
@@ -278,6 +310,8 @@ impl Installs {
             source_path: str_of(&source),
             source_kind: kind,
             installer_path: str_of(&installer),
+            installer_args: serde_json::to_string(&req.args)
+                .map_err(|e| Error::Validation(e.to_string()))?,
         };
         let (env_id, game_id, install_id) =
             self.create_env(&game, Some(&install), &runtime, prefix)?;
@@ -841,15 +875,15 @@ impl Worker {
             .as_path()
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("msi"));
+        let extra: Vec<String> = serde_json::from_str(&inst.installer_args)
+            .map_err(|e| Error::Validation(format!("installer arguments: {e}")))?;
         let mut invocation = if is_msi {
             let msi = to_win(&prefix, &installer).as_str().to_string();
-            inv(
-                Program::System(SystemExe::Msiexec),
-                vec!["/i".into(), msi],
-                cwd,
-            )
+            let mut args = vec!["/i".into(), msi];
+            args.extend(extra);
+            inv(Program::System(SystemExe::Msiexec), args, cwd)
         } else {
-            inv(Program::Exe(installer.clone()), Vec::new(), cwd)
+            inv(Program::Exe(installer.clone()), extra, cwd)
         };
         // Installers never play sound (not a setting); children inherit the env.
         invocation.mute_audio = true;
@@ -1137,5 +1171,64 @@ fn walk(dir: &Path, depth: usize, f: &mut dyn FnMut(&Path, u64, i64)) {
         {
             f(&e.path(), m.len(), m.ctime());
         }
+    }
+}
+
+pub fn find_uninstallers(roots: &[PathBuf], depth: usize) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let Ok(t) = e.file_type() else { continue };
+            let p = e.path();
+            if t.is_dir() && depth > 0 {
+                walk(&p, depth - 1, out);
+            } else if t.is_file() {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                if n.starts_with("unins") && n.ends_with(".exe") {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for r in roots {
+        walk(r, depth, &mut out);
+    }
+    out.sort();
+    out
+}
+
+#[cfg(test)]
+mod unins_tests {
+    use super::*;
+
+    #[test]
+    fn uninstaller_detection() {
+        let d = std::env::temp_dir().join(format!("vortex-unins-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("bin")).unwrap();
+        std::fs::write(d.join("bin/UNINS000.EXE"), b"").unwrap();
+        std::fs::write(d.join("game.exe"), b"").unwrap();
+        let found = find_uninstallers(std::slice::from_ref(&d), 2);
+        assert_eq!(found, vec![d.join("bin/UNINS000.EXE")]);
+        assert!(find_uninstallers(&[d.join("nope")], 2).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::split_args;
+
+    #[test]
+    fn splits_quotes_and_rejects_unterminated() {
+        assert_eq!(
+            split_args(r#"/qn  A="x y" 'p q' "" end"#).unwrap(),
+            ["/qn", "A=x y", "p q", "", "end"]
+        );
+        assert!(split_args("   ").unwrap().is_empty());
+        assert!(split_args(r#"a "b"#).is_err());
     }
 }

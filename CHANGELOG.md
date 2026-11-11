@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/Nexusdeveloper902/Vortex/compare/v0.2.0...v0.3.0) (2026-11-11)
+
+
+### Features
+
+* **core/runner:** mute installer audio ([#37](https://github.com/Nexusdeveloper902/Vortex/issues/37)) ([d719657](https://github.com/Nexusdeveloper902/Vortex/commit/d71965770b0aac24b557b495a7cad8074d90b313))
+
+
+### Bug Fixes
+
+* **core/launch:** start the game's uninstaller via start.exe /wait ([#41](https://github.com/Nexusdeveloper902/Vortex/issues/41)) ([d035bff](https://github.com/Nexusdeveloper902/Vortex/commit/d035bff51a9600c3105435fdaab6d068dc487f23))
+* **gtk/wizard:** no exe choice after a cancelled prefix creation ([#42](https://github.com/Nexusdeveloper902/Vortex/issues/42)) ([642513e](https://github.com/Nexusdeveloper902/Vortex/commit/642513e59ea5cda409494117c0654cec3f795f7a))
+
 ## [0.2.0](https://github.com/Nexusdeveloper902/Vortex/compare/v0.1.0...v0.2.0) (2026-11-11)
 
 

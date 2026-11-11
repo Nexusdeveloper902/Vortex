@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/Nexusdeveloper902/Vortex/compare/v0.3.0...v0.4.0) (2026-11-11)
+
+
+### Features
+
+* **core/artwork:** careful artwork matching, Search Steam dialog, NDA opt-out (M22) ([#51](https://github.com/Nexusdeveloper902/Vortex/issues/51)) ([2734787](https://github.com/Nexusdeveloper902/Vortex/commit/27347874a6039e04c702b516de5e9ea6af886238))
+* first-run tool check (M18) ([#45](https://github.com/Nexusdeveloper902/Vortex/issues/45)) ([c9bc0ce](https://github.com/Nexusdeveloper902/Vortex/commit/c9bc0cea5e743e22bd394ab8f62787991cb5e9c0))
+* M17 automatic game artwork ([#47](https://github.com/Nexusdeveloper902/Vortex/issues/47)) ([c6fd999](https://github.com/Nexusdeveloper902/Vortex/commit/c6fd9995c9f5b59a40fdd5315bbb6fec7126ed27))
+* M19 verbose log retry (Proton log, missing-file diagnosis) ([#49](https://github.com/Nexusdeveloper902/Vortex/issues/49)) ([012129b](https://github.com/Nexusdeveloper902/Vortex/commit/012129b931adc1bffb369ad0c50289c16df1e0f7))
+* M21 custom install and prefix locations ([#50](https://github.com/Nexusdeveloper902/Vortex/issues/50)) ([77d064e](https://github.com/Nexusdeveloper902/Vortex/commit/77d064e117109ab1a23550c56ae7fb658ec065bb))
+* **packaging:** one name, vortex-launcher, for every installed artifact ([#46](https://github.com/Nexusdeveloper902/Vortex/issues/46)) ([156f6b7](https://github.com/Nexusdeveloper902/Vortex/commit/156f6b7fdc55f2d8f34c990ae2a95d2fc4c55645))
+
 ## [0.3.0](https://github.com/Nexusdeveloper902/Vortex/compare/v0.2.0...v0.3.0) (2026-11-11)
 
 

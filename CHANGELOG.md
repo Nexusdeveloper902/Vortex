@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.0](https://github.com/Nexusdeveloper902/Vortex/compare/v0.4.0...v1.0.0) (2026-11-11)
+
+
+### Features
+
+* **core/delete:** backup and runtime removal, log retention (M25) ([#53](https://github.com/Nexusdeveloper902/Vortex/issues/53)) ([29b4428](https://github.com/Nexusdeveloper902/Vortex/commit/29b4428864acf830d1e3585c91d09a4b226068b5))
+* M26 dependency hints, installer arguments, Logs coverage ([#54](https://github.com/Nexusdeveloper902/Vortex/issues/54)) ([cab339d](https://github.com/Nexusdeveloper902/Vortex/commit/cab339d8379f6d234cf9c13ae1a0b647f66ed7a9))
+
+
+### Documentation
+
+* mark Vortex 1.0 and state the tested hardware ([#59](https://github.com/Nexusdeveloper902/Vortex/issues/59)) ([22b4b4e](https://github.com/Nexusdeveloper902/Vortex/commit/22b4b4e87b4442cdb675d81a13262db2f4233674))
+
 ## [0.4.0](https://github.com/Nexusdeveloper902/Vortex/compare/v0.3.0...v0.4.0) (2026-11-11)
 
 

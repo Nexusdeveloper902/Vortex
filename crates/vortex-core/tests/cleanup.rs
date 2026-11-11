@@ -113,7 +113,7 @@ fn log_prune_keeps_newest_and_running() {
     let env = db.insert_environment("/p", true, "/rt").unwrap();
     let mut ids = Vec::new();
     for i in 0..6 {
-        let path = LogWriter::log_path(&paths, 1, 1000 + i, RunKind::Launch);
+        let path = LogWriter::log_path(&paths, None, env, 1000 + i, RunKind::Launch);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "x").unwrap();
         fs::create_dir_all(logs::proton_log_dir(&path)).unwrap();

@@ -412,7 +412,8 @@ Runtimes are not stored: they are discovered on each start; a game's `runtime_pa
 validates surfaces as `RuntimeMissing` with a picker.
 
 Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `data/runtimes/<GE tag>/`,
-`data/runtimes/.tmp-*`, `data/backups/<env_id>-<ts>.tar.gz`, `data/logs/<game_id|env_id>/<run_id>-<kind>.log`,
+`data/runtimes/.tmp-*`, `data/backups/<env_id>-<ts>.tar.gz`, `data/logs/game-<game_id>|env-<env_id>/<run_id>-<kind>.log`
+(created with `create_new`, never reused; versions before M28 wrote `logs/<id>/`),
 `data/artwork/<game_id>.img` (JPEG or PNG, content-sniffed),
 `~/.local/share/applications/io.github.nexusdeveloper902.Vortex.game-<id>.desktop`.
 
@@ -444,6 +445,10 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
   deletes the older runs' log file and `.proton` dir. It only touches paths directly inside
   `logs/<owner>/` (canonicalized), never follows links, and keeps the `runs` rows. No `DeletionPlan`:
   these are fixed managed files the user never chose, like the artwork cache.
+- Removal (M28): `plan_game_removal` lists the game's `logs/game-<id>/` and, when the environment
+  goes too, `logs/env-<id>/` as plan items (strictly inside `logs/`, same checks as prefixes). SQLite
+  reuses the highest deleted `games`/`runs` id, so a new game can get an old id; its log dir is then
+  fresh, and `LogWriter::create` refuses an existing file instead of truncating it.
 - Cleanup tools (M25): `delete::CleanupPlan` (`plan_backup_removal`, `plan_runtime_removal`,
   `execute_cleanup`) follows the `DeletionPlan` contract: shown first, rebuilt and compared before
   deleting. A backup archive must be a direct child of `backups/`; a runtime must be a direct child of

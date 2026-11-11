@@ -82,7 +82,7 @@ fn build(db: &Db, paths: &Paths, env_id: EnvId, game_id: Option<i64>) -> Result<
     let mut manual = Vec::new();
     if remove_env && env.prefix_managed {
         let p = Path::new(&env.prefix_path);
-        if let Some(c) = managed_item(p, &roots, &protect, true)? {
+        if let Some(c) = managed_item(p, &roots, &protect, Kind::Prefix)? {
             items.push(c);
         }
     } else if remove_env && let Some(c) = canon_opt(Path::new(&env.prefix_path)) {
@@ -99,12 +99,25 @@ fn build(db: &Db, paths: &Paths, env_id: EnvId, game_id: Option<i64>) -> Result<
                 && c.as_ref()
                     .is_some_and(|c| c.starts_with(&roots.games) && *c != roots.games);
             if owned {
-                if let Some(c) = managed_item(p, &roots, &protect, false)? {
+                if let Some(c) = managed_item(p, &roots, &protect, Kind::Game)? {
                     items.push(c);
                 }
             } else if let Some(c) = c {
                 manual.push(HostPath::new(c)?);
             }
+        }
+    }
+    // Run logs: the game's own, and the environment's (runs without a game) when it goes too.
+    let mut logs = Vec::new();
+    if let Some(gid) = game_id {
+        logs.push(crate::logs::owner_dir(paths, Some(gid), env_id));
+    }
+    if remove_env {
+        logs.push(crate::logs::owner_dir(paths, None, env_id));
+    }
+    for p in logs {
+        if let Some(c) = managed_item(&p, &roots, &protect, Kind::Logs)? {
+            items.push(c);
         }
     }
     // drop items nested under another item (removing the outer one removes them)
@@ -132,7 +145,16 @@ struct Roots {
     data: PathBuf,
     prefixes: PathBuf,
     games: PathBuf,
+    logs: PathBuf,
     home: PathBuf,
+}
+
+/// Which managed directory a deletion candidate must be strictly inside.
+#[derive(Clone, Copy)]
+enum Kind {
+    Prefix,
+    Game,
+    Logs,
 }
 
 impl Roots {
@@ -142,6 +164,7 @@ impl Roots {
             data: canon(paths.data_dir()),
             prefixes: canon(&paths.prefixes_dir()),
             games: canon(&paths.games_dir()),
+            logs: canon(&paths.logs_dir()),
             home: canon(paths.home()),
         })
     }
@@ -153,7 +176,7 @@ fn canon_opt(p: &Path) -> Option<PathBuf> {
 
 /// Validates one candidate. `Ok(None)` when it does not exist (nothing to delete);
 /// `Err` when it is not allowed.
-fn managed_item(p: &Path, r: &Roots, protect: &[PathBuf], prefix: bool) -> Result<Option<PathBuf>> {
+fn managed_item(p: &Path, r: &Roots, protect: &[PathBuf], kind: Kind) -> Result<Option<PathBuf>> {
     let refuse =
         |why: &str| Error::Validation(format!("refusing to delete {}: {why}", p.display()));
     let Ok(meta) = fs::symlink_metadata(p) else {
@@ -169,12 +192,13 @@ fn managed_item(p: &Path, r: &Roots, protect: &[PathBuf], prefix: bool) -> Resul
     if c == Path::new("/") || c == r.home || r.home.starts_with(&c) || r.data.starts_with(&c) {
         return Err(refuse("it is a protected location"));
     }
-    let in_prefixes = c.starts_with(&r.prefixes) && c != r.prefixes;
-    if prefix && !in_prefixes {
-        return Err(refuse("it is outside the managed prefixes directory"));
-    }
-    if !prefix && !c.starts_with(&r.games) {
-        return Err(refuse("it is outside Vortex's games directory"));
+    let (root, outside) = match kind {
+        Kind::Prefix => (&r.prefixes, "it is outside the managed prefixes directory"),
+        Kind::Game => (&r.games, "it is outside Vortex's games directory"),
+        Kind::Logs => (&r.logs, "it is outside Vortex's logs directory"),
+    };
+    if !c.starts_with(root) || c == *root {
+        return Err(refuse(outside));
     }
     if let Some(x) = protect
         .iter()

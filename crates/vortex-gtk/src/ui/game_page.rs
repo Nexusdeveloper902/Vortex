@@ -620,24 +620,7 @@ fn overflow(
         group.add_action(&a);
     }
     let art = gio::Menu::new();
-    art.append(Some("Refresh artwork"), Some("game.art-refresh"));
-    art.append(Some("Search Steam..."), Some("game.art-search"));
-    art.append(Some("Choose image..."), Some("game.art-choose"));
-    let opted_out = state
-        .db()
-        .get_artwork(g.id)
-        .ok()
-        .flatten()
-        .is_some_and(|a| a.source == vortex_core::db::ArtSource::None);
-    art.append(
-        Some(if opted_out {
-            "Allow automatic artwork lookup"
-        } else {
-            "Don't look up artwork for this game"
-        }),
-        Some("game.art-lookup"),
-    );
-    art.append(Some("Remove artwork"), Some("game.art-remove"));
+    fill_artwork_menu(&art, state, g.id);
     let un_menu = gio::Menu::new();
     un_menu.append(Some("Run the game's uninstaller"), Some("game.uninstaller"));
     un_menu.append(Some("Remove completely..."), Some("game.remove"));
@@ -650,7 +633,44 @@ fn overflow(
         .tooltip_text("Artwork, uninstall or remove")
         .build();
     b.insert_action_group("game", Some(&group));
+    // A lookup or a menu action may have changed the state since the page was built.
+    let state = state.clone();
+    let id = g.id;
+    b.connect_active_notify(move |b| {
+        if b.is_active() {
+            fill_artwork_menu(&art, &state, id);
+        }
+    });
     b
+}
+
+/// Artwork section of the overflow menu, from the game's current lookup state.
+fn fill_artwork_menu(art: &gio::Menu, state: &Rc<AppState>, id: i64) {
+    use artwork::LookupState;
+    let st = artwork::lookup_state(&state.db(), id).unwrap_or(LookupState::NotLookedUp);
+    art.remove_all();
+    art.append(Some("Refresh artwork"), Some("game.art-refresh"));
+    art.append(
+        Some(if st == LookupState::NoMatch {
+            "No match found: Search Steam..."
+        } else {
+            "Search Steam..."
+        }),
+        Some("game.art-search"),
+    );
+    art.append(Some("Choose image..."), Some("game.art-choose"));
+    if st == LookupState::Disabled {
+        art.append(
+            Some("Allow automatic artwork lookup"),
+            Some("game.art-lookup"),
+        );
+    } else if st != LookupState::HasImage {
+        art.append(
+            Some("Don't look up artwork for this game"),
+            Some("game.art-lookup"),
+        );
+    }
+    art.append(Some("Remove artwork"), Some("game.art-remove"));
 }
 
 /// Runs an artwork change off the GTK thread, then redraws every cover of the game.
@@ -729,13 +749,16 @@ fn choose_artwork(state: &Rc<AppState>, id: i64) {
 
 /// Opt out of (or back into) automatic lookups; takes effect now, nothing is queried here.
 fn toggle_auto_lookup(state: &Rc<AppState>, id: i64) {
+    use artwork::LookupState;
     let db = state.db();
-    let r = match db.get_artwork(id) {
-        Ok(Some(a)) if a.source == vortex_core::db::ArtSource::None => {
+    let r = match artwork::lookup_state(&db, id) {
+        Ok(LookupState::Disabled) => {
             artwork::allow_auto(&db, id).map(|()| "Automatic lookup allowed again")
         }
-        Ok(None) => artwork::opt_out(&db, id).map(|()| "Artwork will not be looked up"),
-        Ok(Some(_)) => Ok("This game already has a cover; Remove artwork first"),
+        Ok(LookupState::NotLookedUp | LookupState::NoMatch) => {
+            artwork::opt_out(&db, id).map(|()| "Artwork will not be looked up")
+        }
+        Ok(LookupState::HasImage) => Ok("This game already has a cover; Remove artwork first"),
         Err(e) => Err(e),
     };
     drop(db);

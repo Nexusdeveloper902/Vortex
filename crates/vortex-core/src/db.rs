@@ -14,6 +14,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_artwork.sql"),
     include_str!("../migrations/0003_artwork_candidates.sql"),
     include_str!("../migrations/0004_installer_args.sql"),
+    include_str!("../migrations/0005_artwork_opt_out.sql"),
 ];
 
 pub fn now() -> i64 {
@@ -974,6 +975,8 @@ pub struct Artwork {
     pub updated_at: i64,
     /// Possible Steam matches found but not attached (source `none`); 0 otherwise.
     pub candidates: i64,
+    /// Source `none` chosen by the user (lookup disabled), not a lookup without a match (M28).
+    pub opted_out: bool,
 }
 
 impl Db {
@@ -981,7 +984,7 @@ impl Db {
         Ok(self
             .conn
             .query_row(
-                "SELECT game_id,source,kind,steam_app,updated_at,candidates FROM artwork WHERE game_id=?1",
+                "SELECT game_id,source,kind,steam_app,updated_at,candidates,opted_out FROM artwork WHERE game_id=?1",
                 [game_id],
                 |r| {
                     let kind: Option<String> = r.get(2)?;
@@ -992,6 +995,7 @@ impl Db {
                         steam_app: r.get(3)?,
                         updated_at: r.get(4)?,
                         candidates: r.get(5)?,
+                        opted_out: r.get(6)?,
                     })
                 },
             )
@@ -1007,7 +1011,7 @@ impl Db {
     ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO artwork(game_id,source,kind,steam_app,updated_at) VALUES(?1,?2,?3,?4,?5)
-             ON CONFLICT(game_id) DO UPDATE SET source=?2,kind=?3,steam_app=?4,updated_at=?5,candidates=0",
+             ON CONFLICT(game_id) DO UPDATE SET source=?2,kind=?3,steam_app=?4,updated_at=?5,candidates=0,opted_out=0",
             params![
                 game_id,
                 source.as_str(),
@@ -1062,6 +1066,18 @@ impl Db {
             [],
             run_row,
         )
+    }
+}
+
+// ---- M28 (artwork opt-out) ----
+
+impl Db {
+    /// Records "the user disabled lookups for this game": source `none`, no image, `opted_out`.
+    pub fn set_artwork_opted_out(&self, game_id: i64) -> Result<()> {
+        self.set_artwork(game_id, ArtSource::None, None, None)?;
+        self.conn
+            .execute("UPDATE artwork SET opted_out=1 WHERE game_id=?1", [game_id])?;
+        Ok(())
     }
 }
 

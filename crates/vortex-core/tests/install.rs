@@ -765,10 +765,18 @@ fn custom_prefix_location_and_new_install_dir() {
     }
     assert_eq!(t.db().list_games().unwrap().len(), n);
 
-    // deletion: nothing planned, both folders shown as manual, both survive
+    // deletion: only run logs planned (M28), both folders shown as manual, both survive
     std::fs::write(pfx.join("system.reg"), "x").unwrap();
     let plan = vortex_core::delete::plan_game_removal(&t.db(), &t.paths, s.game_id).unwrap();
-    assert!(plan.remove_env && plan.items.is_empty(), "{plan:?}");
+    let logs = std::fs::canonicalize(t.paths.logs_dir()).unwrap();
+    assert!(
+        plan.remove_env
+            && plan
+                .items
+                .iter()
+                .all(|i| i.path.as_path().starts_with(&logs)),
+        "{plan:?}"
+    );
     let manual: Vec<_> = plan.manual.iter().map(|m| m.as_path()).collect();
     assert!(
         manual.contains(&pfx.as_path()) && manual.contains(&dir.as_path()),

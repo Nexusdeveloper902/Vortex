@@ -122,13 +122,15 @@ pub fn open(state: &Rc<AppState>, id: i64) {
 
 /// One-line artwork state for the game page, if there is something to say.
 pub fn status_line(db: &vortex_core::db::Db, id: i64) -> Option<String> {
-    use vortex_core::db::ArtSource;
-    let a = db.get_artwork(id).ok().flatten()?;
-    match (a.source, a.candidates) {
-        (ArtSource::None, n) if n > 0 => Some(format!(
+    use vortex_core::artwork::LookupState;
+    let n = db.get_artwork(id).ok().flatten()?.candidates;
+    match vortex_core::artwork::lookup_state(db, id).ok()? {
+        LookupState::NoMatch if n > 0 => Some(format!(
             "{n} possible match{} on Steam, none attached. Use Search Steam to choose.",
             if n == 1 { "" } else { "es" }
         )),
-        _ => None,
+        LookupState::NoMatch => Some("No match found on Steam. Use Search Steam to choose.".into()),
+        LookupState::Disabled => Some("Automatic artwork lookup is off for this game.".into()),
+        LookupState::NotLookedUp | LookupState::HasImage => None,
     }
 }

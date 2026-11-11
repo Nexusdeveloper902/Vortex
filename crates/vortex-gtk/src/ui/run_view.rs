@@ -143,6 +143,13 @@ impl RunView {
         self.mark_btn.set_sensitive(false);
     }
 
+    /// No run is attached (e.g. a resumed install): replaces the initial "Starting".
+    pub fn set_idle(&self) {
+        self.status.set_subtitle("Not running");
+        self.stop_btn.set_sensitive(false);
+        self.mark_btn.set_sensitive(false);
+    }
+
     pub fn apply(&self, ev: &RunEvent) {
         match ev {
             RunEvent::Phase(p) => {

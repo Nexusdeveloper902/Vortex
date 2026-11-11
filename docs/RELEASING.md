@@ -17,8 +17,10 @@ fix this file in the same PR that changes the pipeline.
    `cargo update --workspace` and pushes a `chore: sync Cargo.lock` commit. release-please cannot
    bump workspace crates in `Cargo.lock`, and every build uses `--locked`/`--frozen`.
 4. A maintainer (or an agent the owner authorized) merges the release PR. That push makes
-   release-please create the GitHub Release and the tag `vX.Y.Z`, with output
-   `release_created=true`.
+   release-please create the GitHub Release **as a draft** plus the tag `vX.Y.Z`
+   (`"draft": true`, `"force-tag-creation": true`; without the latter GitHub creates no tag for a
+   draft, the build jobs could not check it out and release-please would not find the previous
+   release next time), with output `release_created=true`. A draft is invisible to the public.
 5. The same workflow run then builds and publishes:
    - `tarball`: `archlinux:latest` container, `cargo build --release --locked -p vortex-gtk`,
      `packaging/make-tarball.sh X.Y.Z` → `vortex-X.Y.Z-x86_64-linux.tar.gz`.
@@ -27,7 +29,9 @@ fix this file in the same PR that changes the pipeline.
    - `rpm`: `fedora:latest` container, `cargo generate-rpm -p crates/vortex-gtk` →
      `vortex-X.Y.Z-1.x86_64.rpm`.
    - `publish`: downloads the three, writes `sha256sums.txt`, creates a build provenance
-     attestation (`actions/attest-build-provenance`) and runs `gh release upload --clobber`.
+     attestation (`actions/attest-build-provenance`), runs `gh release upload --clobber`, and
+     only then publishes the draft (`gh release edit vX.Y.Z --draft=false`). So a public release
+     always has its packages.
 
 Tags created by release-please with `GITHUB_TOKEN` do not trigger other workflows, which is why the
 build jobs hang off `release_created` in the same run and not off a tag push.
@@ -66,13 +70,15 @@ gh release download vX.Y.Z -D /tmp/vortex-rel && (cd /tmp/vortex-rel && sha256su
 gh attestation verify /tmp/vortex-rel/vortex_*.deb --repo Nexusdeveloper902/Vortex
 ```
 
-Report the run URL and the asset list. If a build job fails, the GitHub Release already exists
-without assets: fix the cause in a normal PR, then re-run the failed jobs of that workflow run
+Report the run URL and the asset list, and that `gh release view vX.Y.Z --json isDraft` is
+`false`. If a build job fails, the release stays a draft (tag exists, no or partial assets, not
+public): fix the cause in a normal PR, then re-run the failed jobs of that workflow run
 (`gh run rerun "$id" --failed`). The build jobs check out the tag, so a fix merged after the tag is
 not in the rerun; if the fix must be in the artifacts, cut a new patch release instead.
 
 Manual fallback, only if the owner asks: pushing a `vX.Y.Z` tag runs the build jobs for that tag
-and uploads to the existing release of that name (`gh release upload` needs the release to exist).
+and uploads to the existing release of that name (`gh release upload` needs the release to exist,
+draft or not), then publishes it.
 
 ## Packages and names
 
@@ -99,7 +105,7 @@ and uploads to the existing release of that name (`gh release upload` needs the 
   its own minimal permissions (`publish` is the only job with `contents: write` plus
   `id-token`/`attestations: write`; `release-please` has `contents` and `pull-requests: write`).
 - `release-please-config.json`: one root package `.`, `release-type: simple`,
-  `include-component-in-tag: false`, `extra-files` bumps `$.workspace.package.version` in
+  `include-component-in-tag: false`, `draft: true`, `force-tag-creation: true`, `extra-files` bumps `$.workspace.package.version` in
   `Cargo.toml`.
 - `.release-please-manifest.json`, `version.txt`, `CHANGELOG.md`: written by release-please.
 - `packaging/make-tarball.sh`: tarball layout.

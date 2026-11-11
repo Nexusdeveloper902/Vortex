@@ -224,6 +224,19 @@ Things Vortex cannot diagnose:
   logged text, so a clean exit does not prove the game works.
 - Anti-cheat and DRM failures. Vortex does not circumvent them.
 
+### Missing tools and first run
+
+- **"umu-run is required..." banner, or "umu-run was not found".** Vortex runs every Windows program
+  through UMU Launcher. On Arch install `umu-launcher`; on Debian, Ubuntu and Fedora download a
+  package from https://github.com/Open-Wine-Components/umu-launcher/releases. Then press **Check again**.
+- **Dependencies refuses to run.** Vortex uses the winetricks bundled with the runtime, not the host's.
+  Use a runtime that includes it, such as GE-Proton (Proton Experimental does not).
+- **"No Proton runtime found".** Open **Runtimes** and download GE-Proton, or install Proton through
+  Steam.
+- **The first install or launch in a new prefix is slow.** The first time, umu downloads the Steam Linux
+  Runtime (about 700 MB). This happens once, needs a network connection, and is shared by later prefixes.
+  Wait for it to finish; a run that looks idle at this stage is not stuck.
+
 When no finding fits, open the run in **Logs**, read the last lines, and use **Export log** if you want
 to report the problem.
 

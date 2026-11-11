@@ -250,7 +250,7 @@ fn game_logs_are_planned_and_a_reused_id_starts_with_an_empty_log_dir() {
         .unwrap()
         .map(|e| e.unwrap().path())
         .collect();
-    assert_eq!(dir, [new.clone()], "only the new run's log");
+    assert_eq!(dir, std::slice::from_ref(&new), "only the new run's log");
     assert_eq!(fs::read_to_string(&new).unwrap(), "O|new game\n");
 
     // a game sharing its environment: only the game's logs go, the environment's stay

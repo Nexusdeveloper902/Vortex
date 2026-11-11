@@ -12,7 +12,7 @@ use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use vortex_core::db::InstallState;
+use vortex_core::db::{InstallState, RunKind};
 use vortex_core::diagnose::Finding;
 use vortex_core::install::{
     ExeCandidate, InstallEvent, InstallRequest, RegisterEnv, RegisterRequest,
@@ -159,12 +159,24 @@ struct Wizard {
     analysis: RefCell<Option<SourceAnalysis>>,
     installer: Rc<RefCell<Option<HostPath>>>,
     install_id: Cell<i64>,
+    /// An installer run (not just prefix creation) exists for this install.
+    installer_ran: Cell<bool>,
     // progress page
     view: Rc<RunView>,
     status: gtk4::Label,
     findings: gtk4::ListBox,
     retry: gtk4::Button,
     select: gtk4::Button,
+}
+
+/// (Retry, "choose the executable") visibility. Choosing an exe only makes sense once the
+/// installer itself has run; after a failed or cancelled prefix creation there is nothing to pick.
+fn offered_actions(s: InstallState, installer_ran: bool) -> (bool, bool) {
+    let again = matches!(
+        s,
+        InstallState::Failed | InstallState::Cancelled | InstallState::Interrupted
+    );
+    (again, again && installer_ran)
 }
 
 pub fn open(state: &Rc<AppState>) {
@@ -190,6 +202,11 @@ pub fn resume(state: &Rc<AppState>, game_id: i64) {
     }
     let w = Wizard::new(state);
     w.install_id.set(install.id);
+    let ran = state.db().runs_for_game(game_id).map(|r| {
+        r.iter()
+            .any(|r| r.install_id == Some(install.id) && r.kind == RunKind::Install)
+    });
+    w.installer_ran.set(ran.unwrap_or(false));
     w.nav.add(&w.progress_page());
     w.show_state(install.state, &[]);
     w.present();
@@ -224,6 +241,7 @@ impl Wizard {
             analysis: RefCell::default(),
             installer: Rc::default(),
             install_id: Cell::new(0),
+            installer_ran: Cell::new(false),
             view: RunView::new("Cancel install"),
             status: gtk4::Label::builder()
                 .css_classes(["title-3"])
@@ -493,12 +511,9 @@ impl Wizard {
         self.status.set_text(install_state_label(s));
         let resting = is_resting(s);
         self.dialog.set_can_close(resting);
-        let again = matches!(
-            s,
-            InstallState::Failed | InstallState::Cancelled | InstallState::Interrupted
-        );
-        self.retry.set_visible(again);
-        self.select.set_visible(again);
+        let (retry, select) = offered_actions(s, self.installer_ran.get());
+        self.retry.set_visible(retry);
+        self.select.set_visible(select);
         if resting {
             self.view.stop_btn.set_sensitive(false);
             self.view.mark_btn.set_sensitive(false);
@@ -536,7 +551,12 @@ impl Wizard {
             while let Ok(ev) = rx.recv().await {
                 match ev {
                     InstallEvent::State(s) => w.show_state(s, &cands),
-                    InstallEvent::Run { event, .. } => w.view.apply(&event),
+                    InstallEvent::Run { kind, event } => {
+                        if kind == RunKind::Install {
+                            w.installer_ran.set(true);
+                        }
+                        w.view.apply(&event);
+                    }
                     InstallEvent::Finding(f) => w.add_finding(&f),
                     InstallEvent::Candidates(c) => cands = c,
                     InstallEvent::Error(e) => w.state.toast(&e),
@@ -764,6 +784,16 @@ pub fn open_existing(state: &Rc<AppState>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn no_exe_choice_without_installer_run() {
+        use super::{InstallState::*, offered_actions};
+        for s in [Failed, Cancelled, Interrupted] {
+            assert_eq!(offered_actions(s, false), (true, false));
+            assert_eq!(offered_actions(s, true), (true, true));
+        }
+        assert_eq!(offered_actions(Running, true), (false, false));
+    }
+
     use super::*;
 
     #[test]

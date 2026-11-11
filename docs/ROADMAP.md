@@ -295,6 +295,21 @@ install hint instead of the raw I/O error.
 - Files: `runner.rs`, `error.rs`, `vortex-gtk/src/app.rs`, `docs/USER.md`, tests in `tests/tool_check.rs`.
 - Deps: M7, M11.
 
+## M21: Custom install and prefix locations
+
+- Scope (spec 4): the install wizard's install folder may be a new folder (created, never deleted);
+  an optional "Prefix location" (Advanced) creates the prefix elsewhere, recorded `prefix_managed=0`
+  and listed as manual in deletion plans (ARCHITECTURE section 11, rule 5). The Preferences
+  "Default install folder" / "Default prefix folder" prefill `<folder>/<game name>`.
+- Files: `paths.rs`, `install.rs` (`InstallRequest.prefix`), `delete.rs`, `vortex-gtk/src/ui/
+  {install_wizard,settings,dialogs}.rs`, docs; tests in `paths.rs`, `tests/install.rs`,
+  `tests/backup_delete.rs`.
+- Deps: M9, M8, M12.
+- Acceptance: `paths` unit tests (new dir and prefix location rules); `tests/install.rs`
+  `custom_prefix_location_and_new_install_dir` (fake umu-run: prefix created at the custom path, DB
+  records it unmanaged, refused overlaps write nothing, deletion plan lists it as manual and keeps
+  it); `begin_validates_before_writing_anything` covers bad prefix locations.
+
 ## Top risks (details: ARCHITECTURE section 14)
 
 1. Completion detection for detached/delayed second-stage installers (S1-S3). Mitigated by the

@@ -124,8 +124,35 @@ jobs:
           name: rpm
           path: vortex-launcher-*.rpm
 
+  # Install each built package on its target distro and check it starts (see packaging/smoke.sh).
+  # A failure here keeps the release a draft.
+  smoke:
+    needs: [tarball, deb, rpm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:trixie", kind: deb, artifact: deb }
+          - { image: "ubuntu:25.04", kind: deb, artifact: deb }
+          - { image: "fedora:latest", kind: rpm, artifact: rpm }
+          - { image: "archlinux:latest", kind: tar, artifact: tarball }
+          - { image: "debian:trixie", kind: tar-debian, artifact: tarball }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: pkg
+      - name: Install and start the package in ${{ matrix.image }}
+        run: >
+          docker run --rm -v "$PWD/pkg:/pkg:ro" -v "$PWD/packaging/smoke.sh:/smoke.sh:ro"
+          "${{ matrix.image }}" sh /smoke.sh "${{ matrix.kind }}" /pkg
+
   publish:
-    needs: [tag, tarball, deb, rpm]
+    needs: [tag, tarball, deb, rpm, smoke]
     runs-on: ubuntu-latest
     permissions:
       contents: write

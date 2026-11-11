@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use vortex_core::db::{Db, DepState, NewGame, RunKind};
 use vortex_core::error::Error;
-use vortex_core::launch::{launch_game, run_in_env};
+use vortex_core::launch::{launch_game, run_in_env, run_uninstaller};
 use vortex_core::paths::{HostPath, Paths, PrefixDir};
 use vortex_core::process::{Exit, Outcome, RunEvent, Runs, Timing, scan_marker};
-use vortex_core::runner::Tools;
+use vortex_core::runner::{MUTE_AUDIO_OVERRIDES, Tools};
 use vortex_core::winetricks;
 
 const MANIFEST: &str = env!("CARGO_MANIFEST_DIR");
@@ -23,6 +23,8 @@ struct Shared {
     /// umu-run stand-in for winetricks: `list-all` prints the fixture, a verb is appended to
     /// `$WINEPREFIX/winetricks.log`; exits 1 if it is already there (like real umu-run).
     wt: std::path::PathBuf,
+    /// fake-umu-run that records to `$PWD/.fake-rec` (runs that take no extra env).
+    rec: std::path::PathBuf,
 }
 
 /// Built once before anything is spawned (avoids ETXTBSY from forks racing a write).
@@ -63,10 +65,18 @@ echo "$2" >> "$WINEPREFIX/winetricks.log"
                 fixture.display()
             ),
         );
+        let rec = std::env::temp_dir().join(format!("vortex-m16-rec-{}", std::process::id()));
+        exec(
+            &rec,
+            &format!(
+                "#!/bin/sh\nFAKE_UMU_OUT=\"$PWD/.fake-rec\" exec '{MANIFEST}/tests/fake-umu-run' \"$@\"\n"
+            ),
+        );
         Shared {
             runtime: mk(true),
             plain: mk(false),
             wt,
+            rec,
         }
     })
 }
@@ -209,6 +219,10 @@ fn launch_passes_args_env_and_exe_dir_cwd() {
         env.lines()
             .any(|l| l == format!("WINEPREFIX={}", e.prefix.as_path().display()))
     );
+    assert!(
+        !env.contains(MUTE_AUDIO_OVERRIDES),
+        "games keep their sound"
+    );
     // Last launch info.
     let db = e.db.lock().unwrap();
     let last = db.last_launch(id).unwrap().unwrap();
@@ -346,6 +360,8 @@ fn run_in_env_exe_and_msi() {
         )),
         "{rec}"
     );
+    let env = std::fs::read_to_string(format!("{}.env", out.display())).unwrap();
+    assert!(!env.contains(MUTE_AUDIO_OVERRIDES), "Run EXE is not muted");
 
     std::fs::write(e.dir.as_path().join("Setup.MSI"), "x").unwrap();
     let (h, rx) = run_in_env(
@@ -385,6 +401,37 @@ fn run_in_env_exe_and_msi() {
         vec![],
     )
     .map(|_| ());
+    assert!(matches!(r, Err(Error::Validation(_))));
+}
+
+#[test]
+fn uninstaller_runs_muted_in_its_folder() {
+    if rustix::process::geteuid().is_root() {
+        return; // spawning is refused as root (see fake_env)
+    }
+    let tools = Tools {
+        umu_run: shared().rec.clone(),
+    };
+    let e = env_with(tools, shared().runtime.path(), fast());
+    let exe = e.dir.join("unins000.exe").unwrap();
+    std::fs::write(exe.as_path(), "MZ").unwrap();
+    let (h, rx) = run_uninstaller(&e.runs, &e.db, &e.paths, e.env_id, &exe).unwrap();
+    assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(0)));
+    let rec = std::fs::read_to_string(e.dir.as_path().join(".fake-rec")).unwrap();
+    let dir = e.dir.as_path().display();
+    assert_eq!(rec, format!("cwd={dir}\narg={dir}/unins000.exe\n"));
+    let env = std::fs::read_to_string(e.dir.as_path().join(".fake-rec.env")).unwrap();
+    let overrides = env
+        .lines()
+        .find_map(|l| l.strip_prefix("WINEDLLOVERRIDES="))
+        .unwrap_or_default();
+    assert!(overrides.ends_with(MUTE_AUDIO_OVERRIDES), "{overrides:?}");
+    assert_eq!(
+        e.db.lock().unwrap().get_run(h.run_id()).unwrap().kind,
+        RunKind::Exec
+    );
+    let txt = e.dir.join("readme.txt").unwrap();
+    let r = run_uninstaller(&e.runs, &e.db, &e.paths, e.env_id, &txt).map(|_| ());
     assert!(matches!(r, Err(Error::Validation(_))));
 }
 
@@ -553,6 +600,7 @@ fn init_prefix(e: &Env) {
         runtime: e.runtime.clone(),
         env: vec![],
         verbose_log_dir: None,
+        mute_audio: false,
     };
     let (h, rx) = e
         .runs

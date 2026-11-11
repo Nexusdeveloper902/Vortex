@@ -70,6 +70,7 @@ pub fn game_invocation(game: &Game, prefix: PrefixDir, runtime: HostPath) -> Res
         runtime,
         env: env.into_iter().collect(),
         verbose_log_dir: None,
+        mute_audio: false,
     })
 }
 
@@ -148,6 +149,17 @@ pub fn run_in_env(
     args: Vec<String>,
     env: Vec<(String, String)>,
 ) -> Result<Started> {
+    runs.start(exec_spec(db, paths, env_id, file, args, env)?)
+}
+
+fn exec_spec(
+    db: &Mutex<Db>,
+    paths: &Paths,
+    env_id: i64,
+    file: &HostPath,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+) -> Result<RunSpec> {
     let (_, prefix, runtime) = environment_of(paths, db, env_id)?;
     let ext = file
         .as_path()
@@ -177,7 +189,7 @@ pub fn run_in_env(
     let cwd = file
         .parent()
         .ok_or_else(|| Error::InvalidPath(format!("{} has no folder", file.as_path().display())))?;
-    runs.start(RunSpec {
+    Ok(RunSpec {
         kind: RunKind::Exec,
         env_id,
         game_id: None,
@@ -190,6 +202,32 @@ pub fn run_in_env(
             runtime,
             env,
             verbose_log_dir: None,
+            mute_audio: false,
         },
     })
+}
+
+/// Runs a game's own uninstaller (`unins*.exe`, no args) inside its environment. Like
+/// [`run_in_env`], but with the audio drivers disabled for the run's process tree (installers
+/// and uninstallers never play sound; ARCHITECTURE section 5).
+pub fn run_uninstaller(
+    runs: &Runs,
+    db: &Mutex<Db>,
+    paths: &Paths,
+    env_id: i64,
+    exe: &HostPath,
+) -> Result<Started> {
+    let is_exe = exe
+        .as_path()
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+    if !is_exe {
+        return Err(Error::Validation(format!(
+            "{} is not an .exe file",
+            exe.as_path().display()
+        )));
+    }
+    let mut spec = exec_spec(db, paths, env_id, exe, vec![], vec![])?;
+    spec.invocation.mute_audio = true;
+    runs.start(spec)
 }

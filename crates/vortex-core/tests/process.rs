@@ -136,6 +136,7 @@ impl Env {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             verbose_log_dir: None,
+            mute_audio: false,
         }
     }
     fn setup_exe(&self) -> Program {

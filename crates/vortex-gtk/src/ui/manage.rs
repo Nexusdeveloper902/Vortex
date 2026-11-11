@@ -447,15 +447,7 @@ pub fn run_uninstaller(state: &Rc<AppState>, game_id: i64, exe: std::path::PathB
                 let (runs, db, paths) = (s.runs.clone(), s.db.clone(), s.paths.clone());
                 let env = g.environment_id;
                 let res = blocking(move || {
-                    launch::run_in_env(
-                        &runs,
-                        &db,
-                        &paths,
-                        env,
-                        &HostPath::new(&exe)?,
-                        vec![],
-                        vec![],
-                    )
+                    launch::run_uninstaller(&runs, &db, &paths, env, &HostPath::new(&exe)?)
                 })
                 .await;
                 match res {

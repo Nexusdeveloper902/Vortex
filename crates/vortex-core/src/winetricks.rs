@@ -145,6 +145,7 @@ fn list_in(tools: &Tools, runtime: &HostPath, prefix: PrefixDir) -> Result<Vec<V
         runtime: runtime.clone(),
         env: vec![],
         verbose_log_dir: None,
+        mute_audio: false,
     };
     let mut child = inv
         .command(tools, "vortex-list-verbs")?
@@ -220,6 +221,7 @@ pub fn install_verb(
         runtime,
         env: vec![],
         verbose_log_dir: None,
+        mute_audio: false,
     };
     let (handle, rx) = runs.start(RunSpec {
         kind: RunKind::Winetricks,

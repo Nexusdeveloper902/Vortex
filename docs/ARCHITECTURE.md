@@ -139,6 +139,14 @@ Command::new(tools.umu_run)                // default: "umu-run" resolved on PAT
 - Inherited environment is kept (DISPLAY, WAYLAND_DISPLAY, XDG_RUNTIME_DIR, ...). Reserved names
   (`WINEPREFIX`, `PROTONPATH`, `VORTEX_RUN_ID`, `STEAM_COMPAT_*`, `PRESSURE_VESSEL_*`) cannot be set
   by the user. `GAMEID`, `PROTON_*`, `DXVK_*`, `VKD3D_*`, `WINEDLLOVERRIDES` can.
+- **Installers are muted** (not a setting): runs of kind `install` (retries included) and the
+  game's uninstaller (`launch::run_uninstaller`) get `Invocation::mute_audio`, which sets
+  `WINEDLLOVERRIDES=<existing>;winepulse.drv,winealsa.drv,wineoss.drv=d`. `<existing>` is the run's
+  own value, else the inherited one; ours comes last so it wins. Proton appends its own overrides
+  after it (`append_to_env_str(..., ";")`), so it is kept. Every Wine process of the run inherits
+  it; Wine then has no audio driver and reports no render device. It is per-run env only, never
+  written to the prefix registry, so launches in the same prefix keep their sound. Launch,
+  "Run EXE", winetricks and prefix-init runs are not muted.
 - **Built-ins by full path [VL M1 F1]**: with a bare name (`cmd`, `msiexec`) umu-run logs
   "Executable not found", passes the name through, and always exits 0, losing the real code. As
   `C:\windows\system32\cmd.exe` the code propagates (umu still logs the same benign warning).

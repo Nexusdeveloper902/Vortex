@@ -746,6 +746,7 @@ impl Worker {
             runtime: runtime.clone(),
             env: Vec::new(),
             verbose_log_dir: None,
+            mute_audio: false,
         };
 
         let installer = HostPath::new(&inst.installer_path)?;
@@ -803,7 +804,7 @@ impl Worker {
             .as_path()
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("msi"));
-        let invocation = if is_msi {
+        let mut invocation = if is_msi {
             let msi = to_win(&prefix, &installer).as_str().to_string();
             inv(
                 Program::System(SystemExe::Msiexec),
@@ -813,6 +814,8 @@ impl Worker {
         } else {
             inv(Program::Exe(installer.clone()), Vec::new(), cwd)
         };
+        // Installers never play sound (not a setting); children inherit the env.
+        invocation.mute_audio = true;
         // ponytail: in-memory snapshot per attempt (retries included); installer output never
         // reaches umu's pipes, so a vanished/resized file is the only hard evidence.
         let before = crate::source::listing(source.as_path()).unwrap_or_default();

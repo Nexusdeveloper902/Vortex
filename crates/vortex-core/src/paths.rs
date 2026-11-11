@@ -188,6 +188,13 @@ impl Paths {
     pub fn logs_dir(&self) -> PathBuf {
         self.data.join("logs")
     }
+    /// Cached cover images, one file per game (`artwork.rs`).
+    pub fn artwork_dir(&self) -> PathBuf {
+        self.data.join("artwork")
+    }
+    pub fn artwork_file(&self, game_id: i64) -> PathBuf {
+        self.artwork_dir().join(format!("{game_id}.img"))
+    }
     pub fn applications_dir(&self) -> &Path {
         &self.applications
     }

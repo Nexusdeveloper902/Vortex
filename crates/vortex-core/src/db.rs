@@ -1053,6 +1053,18 @@ impl Db {
     }
 }
 
+/// Every run, newest first (log retention).
+impl Db {
+    pub fn all_runs(&self) -> Result<Vec<Run>> {
+        collect(
+            &self.conn,
+            &format!("{RUN_SELECT} ORDER BY id DESC"),
+            [],
+            run_row,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -164,6 +164,10 @@ that are already installed are recorded and skipped.
 The **Runtimes** page lists the Proton runtimes Vortex found. Choose **Use as default** to set the
 runtime for new games.
 
+Runtimes that Vortex downloaded have a trash button. It confirms, then deletes that folder. Vortex
+refuses when any game still uses the runtime (it names the games; change their runtime first). Steam's and
+system runtimes are never removable here.
+
 Vortex looks for runtimes in its own runtimes folder, in Steam's `compatibilitytools.d` folders, in the
 `steamapps/common` folders of your Steam libraries, and in `~/.local/share/umu/compatibilitytools`.
 
@@ -179,6 +183,9 @@ match. It is disabled in offline mode. Turn offline mode off in **Preferences** 
 - **Restore** lists the prefix's backups. Restoring replaces the current prefix after you confirm. The
   current prefix is moved aside and removed only after the restore succeeds. Saves and settings inside
   the prefix are replaced too.
+
+- **Delete backup** (trash button in the Restore list) shows the archive path and size, and removes the
+  archive after you confirm. Backups are about 100 MB or more each, so delete old ones.
 
 A backup contains the prefix only. Install folders that Vortex created under its `games` folder, and
 installer sources, are not included.
@@ -211,6 +218,9 @@ dependency installs and prefix setup. Each run shows its state (Running, Waiting
 Finished, Stopped, Interrupted) and its exit code. Open a run to read its log. **Export log** in the log
 viewer copies the file wherever you choose. Runs started without a game (**Run EXE/MSI** and
 dependency installs) appear in the Logs of every game that shares their environment.
+
+At startup Vortex keeps the newest 20 runs' logs per game and deletes older ones. Logs of running
+programs are never deleted. A pruned run stays listed, but its log is gone.
 
 Every line from a program goes through redaction before it reaches a log file or the screen. Lines
 that Vortex itself writes start with `vortex: `. Vortex does not log your full environment.

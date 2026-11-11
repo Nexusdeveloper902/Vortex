@@ -1,6 +1,7 @@
 //! Runtimes page: discovered Proton list, global default, GE-Proton install with progress.
 
 use crate::app::{AppState, blocking};
+use crate::ui::dialogs::{confirm, human_size, with_db};
 use crate::ui::settings::{KEY_DEFAULT_RUNTIME, KEY_OFFLINE};
 use gtk4::prelude::*;
 use libadwaita as adw;
@@ -10,6 +11,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use vortex_core::delete;
 use vortex_core::error::Error;
 use vortex_core::runtime::{self, Runtime};
 use vortex_core::runtime_ge::{self, Progress};
@@ -55,6 +57,42 @@ impl Page {
         });
     }
 
+    /// Plans (refused when a game uses it or it is not Vortex's), confirms, then deletes.
+    fn remove(self: &Rc<Self>, rt: &Path) {
+        let state = &self.state;
+        let plan = match delete::plan_runtime_removal(&state.db(), &state.paths, rt) {
+            Ok(p) => p,
+            Err(e) => return state.toast(&e.to_string()),
+        };
+        let body = format!(
+            "{} ({}) will be deleted. This cannot be undone.",
+            plan.item.path.as_path().display(),
+            human_size(plan.item.bytes)
+        );
+        let page = self.clone();
+        confirm(
+            state,
+            "Remove this runtime?",
+            &body,
+            "Remove",
+            true,
+            move || {
+                let (page, plan) = (page.clone(), plan.clone());
+                gtk4::glib::spawn_future_local(async move {
+                    match with_db(&page.state, move |db, paths| {
+                        delete::execute_cleanup(db, paths, &plan)
+                    })
+                    .await
+                    {
+                        Ok(()) => page.state.toast("Runtime removed"),
+                        Err(e) => page.state.toast(&e.to_string()),
+                    }
+                    page.refresh();
+                });
+            },
+        );
+    }
+
     fn show(self: &Rc<Self>, found: &[Runtime]) {
         for r in self.rows.take() {
             self.list.remove(&r);
@@ -93,6 +131,16 @@ impl Page {
                 }
             });
             row.add_prefix(&radio);
+            if source_of(p, &vortex_dir) == "Vortex" {
+                let del = gtk4::Button::builder()
+                    .icon_name("user-trash-symbolic")
+                    .tooltip_text("Remove this runtime")
+                    .valign(gtk4::Align::Center)
+                    .build();
+                let (page, rt) = (self.clone(), p.to_path_buf());
+                del.connect_clicked(move |_| page.remove(&rt));
+                row.add_suffix(&del);
+            }
             self.list.add(&row);
             self.rows.borrow_mut().push(row);
         }

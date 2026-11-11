@@ -439,6 +439,16 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
   under the run's `cwd_win`, leaves out `.dll/.drv/.manifest/.local/.config/.mui` probes, and only for a
   failed run: `MissingInstallerData` (install) or `MissingFile` (other kinds), Likely.
   Nothing is reported as Confirmed unless the evidence is unambiguous (spec 10, last line).
+- Retention (M25): `logs::prune(db, paths, KEEP_RUNS_PER_OWNER = 20)` runs at startup on a worker thread
+  (after recovery). Per log directory it keeps the newest N runs and every running/waiting run, and
+  deletes the older runs' log file and `.proton` dir. It only touches paths directly inside
+  `logs/<owner>/` (canonicalized), never follows links, and keeps the `runs` rows. No `DeletionPlan`:
+  these are fixed managed files the user never chose, like the artwork cache.
+- Cleanup tools (M25): `delete::CleanupPlan` (`plan_backup_removal`, `plan_runtime_removal`,
+  `execute_cleanup`) follows the `DeletionPlan` contract: shown first, rebuilt and compared before
+  deleting. A backup archive must be a direct child of `backups/`; a runtime must be a direct child of
+  `runtimes/` (never Steam's) and no environment may use it (refused, naming the games). Directories go
+  through `remove_dir_all`, which unlinks symlinks without following them.
 
 ## 11. Security rules (spec 12)
 

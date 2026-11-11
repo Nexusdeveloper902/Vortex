@@ -264,3 +264,128 @@ pub fn execute(db: &Db, paths: &Paths, plan: &DeletionPlan) -> Result<()> {
     }
     Ok(())
 }
+
+// ---- backups and runtimes (M25) ----
+
+/// What a [`CleanupPlan`] removes besides the item itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupTarget {
+    /// A backup archive (a file) and its database row.
+    Backup(i64),
+    /// A Vortex-downloaded runtime directory.
+    Runtime,
+}
+
+/// One managed path to delete, shown to the user first. Same contract as [`DeletionPlan`]:
+/// [`execute_cleanup`] rebuilds the plan and deletes only if it still matches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanupPlan {
+    pub target: CleanupTarget,
+    pub item: DeletionItem,
+}
+
+fn canon_dir(p: &Path) -> PathBuf {
+    fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Plan for deleting backup `id`: its archive must be a direct child of the backups directory.
+/// A missing archive is fine (only the row goes).
+pub fn plan_backup_removal(db: &Db, paths: &Paths, id: i64) -> Result<CleanupPlan> {
+    let b = db.get_backup(id)?;
+    let p = Path::new(&b.archive_path);
+    let refuse =
+        |why: &str| Error::Validation(format!("refusing to delete {}: {why}", p.display()));
+    let name = p.file_name().ok_or_else(|| refuse("not a file path"))?;
+    let parent = p.parent().ok_or_else(|| refuse("not a file path"))?;
+    if canon_dir(parent) != canon_dir(&paths.backups_dir()) {
+        return Err(refuse("it is outside Vortex's backups directory"));
+    }
+    let path = canon_dir(parent).join(name);
+    let bytes = match fs::symlink_metadata(&path) {
+        Ok(m) if m.is_file() || m.is_symlink() => m.len(),
+        Ok(_) => return Err(refuse("it is not a file")),
+        Err(_) => 0,
+    };
+    Ok(CleanupPlan {
+        target: CleanupTarget::Backup(id),
+        item: DeletionItem {
+            path: HostPath::new(path)?,
+            bytes,
+        },
+    })
+}
+
+/// Plan for deleting a runtime. Only a direct child of Vortex's runtimes directory qualifies
+/// (never Steam's Proton), and only when no environment uses it.
+pub fn plan_runtime_removal(db: &Db, paths: &Paths, runtime: &Path) -> Result<CleanupPlan> {
+    let refuse =
+        |why: &str| Error::Validation(format!("refusing to remove {}: {why}", runtime.display()));
+    let root = canon_dir(&paths.runtimes_dir());
+    let meta = fs::symlink_metadata(runtime).map_err(Error::io(runtime))?;
+    if meta.is_symlink() || !meta.is_dir() {
+        return Err(refuse("it is not a directory"));
+    }
+    let c = fs::canonicalize(runtime).map_err(Error::io(runtime))?;
+    if c.parent() != Some(root.as_path()) {
+        return Err(refuse("it was not downloaded by Vortex"));
+    }
+    let mut users = Vec::new();
+    for e in db.list_environments()? {
+        if e.runtime_path == c.to_string_lossy()
+            || canon_opt(Path::new(&e.runtime_path)) == Some(c.clone())
+        {
+            for g in db.games_in_environment(e.id)? {
+                users.push(g.name);
+            }
+            if db.games_in_environment(e.id)?.is_empty() {
+                users.push(format!("environment {}", e.id));
+            }
+        }
+    }
+    if !users.is_empty() {
+        return Err(Error::Validation(format!(
+            "{} is still used by: {}. Change their runtime first.",
+            runtime.display(),
+            users.join(", ")
+        )));
+    }
+    Ok(CleanupPlan {
+        target: CleanupTarget::Runtime,
+        item: DeletionItem {
+            bytes: tree_bytes(&c),
+            path: HostPath::new(c)?,
+        },
+    })
+}
+
+/// Removes exactly `plan` after rebuilding and comparing it. Directories are removed with
+/// `remove_dir_all` (symlinks inside are unlinked, never followed).
+pub fn execute_cleanup(db: &Db, paths: &Paths, plan: &CleanupPlan) -> Result<()> {
+    let fresh = match &plan.target {
+        CleanupTarget::Backup(id) => plan_backup_removal(db, paths, *id)?,
+        CleanupTarget::Runtime => plan_runtime_removal(db, paths, plan.item.path.as_path())?,
+    };
+    if fresh.item.path != plan.item.path {
+        return Err(Error::Validation(
+            "the deletion plan changed; review it again".into(),
+        ));
+    }
+    let p = fresh.item.path.as_path();
+    let r = match plan.target {
+        CleanupTarget::Backup(_) => fs::remove_file(p),
+        CleanupTarget::Runtime => fs::remove_dir_all(p),
+    };
+    match r {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(Error::Io {
+                path: p.to_path_buf(),
+                source: e,
+            });
+        }
+        _ => {}
+    }
+    if let CleanupTarget::Backup(id) = plan.target {
+        db.delete_backup(id)?;
+    }
+    Ok(())
+}

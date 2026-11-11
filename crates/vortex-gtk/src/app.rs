@@ -178,6 +178,14 @@ fn activate(app: &adw::Application, slot: &Slot) {
         nav: nav.clone(),
     });
     *slot.borrow_mut() = Some(state.clone());
+    // Log retention, off the GTK thread (after recovery, so detached runs count as running).
+    let prune_paths = state.paths.clone();
+    std::thread::spawn(move || {
+        if let Ok(db) = vortex_core::db::Db::open(&prune_paths.db_file()) {
+            let _ =
+                vortex_core::logs::prune(&db, &prune_paths, vortex_core::logs::KEEP_RUNS_PER_OWNER);
+        }
+    });
     dialogs::quit_guard(&state);
     install_actions(app, &state);
     if let Err(e) = recovered {

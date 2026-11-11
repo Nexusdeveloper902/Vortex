@@ -2,7 +2,7 @@
 //! runtime; `#[ignore]` tests (`it_*`) use real umu-run (see the comments above them).
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use vortex_core::db::{Db, DepState, NewGame, RunKind};
 use vortex_core::error::Error;
@@ -25,12 +25,20 @@ struct Shared {
     wt: std::path::PathBuf,
     /// fake-umu-run that records to `$PWD/.fake-rec` (runs that take no extra env).
     rec: std::path::PathBuf,
+    /// Owns `wt` and `rec`.
+    _scripts: tempfile::TempDir,
 }
 
-/// Built once before anything is spawned (avoids ETXTBSY from forks racing a write).
-fn shared() -> &'static Shared {
-    static S: OnceLock<Shared> = OnceLock::new();
-    S.get_or_init(|| {
+/// Built while holding the lock, before anything uses it (avoids ETXTBSY from forks racing a
+/// write). Shared by all tests running at once; the temp dirs are removed when the last `Env`
+/// (or local `Arc`) drops, because a plain static would never run `TempDir::drop`.
+fn shared() -> Arc<Shared> {
+    static S: Mutex<Weak<Shared>> = Mutex::new(Weak::new());
+    let mut slot = S.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = slot.upgrade() {
+        return s;
+    }
+    let s = Arc::new({
         use std::os::unix::fs::PermissionsExt;
         let exec = |p: &Path, body: &str| {
             std::fs::write(p, body).unwrap();
@@ -51,7 +59,8 @@ fn shared() -> &'static Shared {
             }
             d
         };
-        let wt = std::env::temp_dir().join(format!("vortex-m10-wt-{}", std::process::id()));
+        let scripts = tempfile::tempdir().unwrap();
+        let wt = scripts.path().join("wt");
         let fixture = Path::new(MANIFEST).join("tests/fixtures/winetricks/list-all.txt");
         exec(
             &wt,
@@ -65,7 +74,7 @@ echo "$2" >> "$WINEPREFIX/winetricks.log"
                 fixture.display()
             ),
         );
-        let rec = std::env::temp_dir().join(format!("vortex-m16-rec-{}", std::process::id()));
+        let rec = scripts.path().join("rec");
         exec(
             &rec,
             &format!(
@@ -77,8 +86,11 @@ echo "$2" >> "$WINEPREFIX/winetricks.log"
             plain: mk(false),
             wt,
             rec,
+            _scripts: scripts,
         }
-    })
+    });
+    *slot = Arc::downgrade(&s);
+    s
 }
 
 struct Env {
@@ -90,6 +102,7 @@ struct Env {
     prefix: PrefixDir,
     runtime: HostPath,
     dir: HostPath,
+    _shared: Arc<Shared>,
 }
 
 fn fast() -> Timing {
@@ -102,6 +115,7 @@ fn fast() -> Timing {
 }
 
 fn env_with(tools: Tools, runtime: &Path, timing: Timing) -> Env {
+    let shared = shared();
     let tmp = tempfile::tempdir().unwrap();
     let paths = Paths::under(tmp.path());
     let db = Db::open(&paths.db_file()).unwrap();
@@ -127,6 +141,7 @@ fn env_with(tools: Tools, runtime: &Path, timing: Timing) -> Env {
         prefix,
         runtime: HostPath::new(runtime).unwrap(),
         dir,
+        _shared: shared,
     }
 }
 
@@ -138,7 +153,8 @@ fn fake_tools() -> Tools {
 
 /// `None` as root (CI): verifies that launching refuses to spawn, then the test ends.
 fn fake_env() -> Option<Env> {
-    let e = env_with(fake_tools(), shared().runtime.path(), fast());
+    let sh = shared();
+    let e = env_with(fake_tools(), sh.runtime.path(), fast());
     std::fs::write(e.dir.as_path().join("game.exe"), "MZ").unwrap();
     if rustix::process::geteuid().is_root() {
         let id = e.game(&[], &[], None);
@@ -409,10 +425,11 @@ fn uninstaller_runs_muted_outside_its_folder() {
     if rustix::process::geteuid().is_root() {
         return; // spawning is refused as root (see fake_env)
     }
+    let sh = shared();
     let tools = Tools {
-        umu_run: shared().rec.clone(),
+        umu_run: sh.rec.clone(),
     };
-    let e = env_with(tools, shared().runtime.path(), fast());
+    let e = env_with(tools, sh.runtime.path(), fast());
     let exe = e.dir.join("unins000.exe").unwrap();
     std::fs::write(exe.as_path(), "MZ").unwrap();
     // No drive_c yet: refused before anything runs.
@@ -521,11 +538,12 @@ fn installed_from_log_and_filter() {
 #[test]
 fn experimental_style_runtime_is_refused_clearly() {
     let Some(e) = fake_env() else { return };
-    let plain = HostPath::new(shared().plain.path()).unwrap();
+    let sh = shared();
+    let plain = HostPath::new(sh.plain.path()).unwrap();
     let err = winetricks::list_verbs(&fake_tools(), &plain, &e.paths).unwrap_err();
     assert!(matches!(err, Error::RuntimeInvalid { .. }));
     assert!(err.to_string().contains("GE-Proton or UMU-Proton"), "{err}");
-    let e2 = env_with(fake_tools(), shared().plain.path(), fast());
+    let e2 = env_with(fake_tools(), sh.plain.path(), fast());
     let err = winetricks::install_verb(
         &e2.runs,
         &e2.db,
@@ -542,10 +560,11 @@ fn experimental_style_runtime_is_refused_clearly() {
 #[test]
 fn list_install_records_dependency_and_skips_installed() {
     let Some(_) = fake_env() else { return };
+    let sh = shared();
     let tools = Tools {
-        umu_run: shared().wt.clone(),
+        umu_run: sh.wt.clone(),
     };
-    let e = env_with(tools.clone(), shared().runtime.path(), fast());
+    let e = env_with(tools.clone(), sh.runtime.path(), fast());
     let known = winetricks::list_verbs(&tools, &e.runtime, &e.paths).unwrap();
     assert_eq!(known.len(), 7);
     let (h, rx) = winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, "vcrun2019", &known)
@@ -583,7 +602,8 @@ fn list_install_records_dependency_and_skips_installed() {
 fn failed_verb_is_recorded_failed() {
     let Some(_) = fake_env() else { return };
     // fake-umu-run exits 0 but never writes winetricks.log: not confirmed, so `failed`.
-    let e = env_with(fake_tools(), shared().runtime.path(), fast());
+    let sh = shared();
+    let e = env_with(fake_tools(), sh.runtime.path(), fast());
     let (_, rx) = winetricks::install_verb(
         &e.runs,
         &e.db,

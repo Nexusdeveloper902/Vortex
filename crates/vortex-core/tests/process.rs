@@ -5,7 +5,7 @@
 //! `#[ignore]` tests (`it_*`) drive the real umu-run + Proton from `VORTEX_IT_PROTON`.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use vortex_core::db::{Db, RunKind, RunState};
 use vortex_core::error::Error;
@@ -19,9 +19,15 @@ use vortex_core::runner::{Invocation, Program, SystemExe, Tools};
 const MANIFEST: &str = env!("CARGO_MANIFEST_DIR");
 
 /// Fake Proton dir, built once per test binary before anything is spawned (avoids ETXTBSY).
-fn fake_runtime() -> &'static Path {
-    static RT: OnceLock<tempfile::TempDir> = OnceLock::new();
-    RT.get_or_init(|| {
+/// Shared by concurrent tests; removed when the last holder drops (a static would never run
+/// `TempDir::drop`).
+fn fake_runtime() -> Arc<tempfile::TempDir> {
+    static RT: Mutex<Weak<tempfile::TempDir>> = Mutex::new(Weak::new());
+    let mut slot = RT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(r) = slot.upgrade() {
+        return r;
+    }
+    let r = Arc::new({
         use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let bin = d.path().join("files/bin");
@@ -49,8 +55,9 @@ exit 2
         }
         std::fs::write(d.path().join("toolmanifest.vdf"), "\"manifest\" {}\n").unwrap();
         d
-    })
-    .path()
+    });
+    *slot = Arc::downgrade(&r);
+    r
 }
 
 struct Env {
@@ -63,6 +70,7 @@ struct Env {
     runtime: HostPath,
     /// Installer dir with a space in its name.
     dir: HostPath,
+    _rt: Option<Arc<tempfile::TempDir>>,
 }
 
 fn fast() -> Timing {
@@ -99,6 +107,7 @@ fn env_with(tools: Tools, runtime: &Path, timing: Timing, tmp: tempfile::TempDir
         prefix,
         runtime: HostPath::new(runtime).unwrap(),
         dir,
+        _rt: None,
     }
 }
 
@@ -109,7 +118,8 @@ fn fake_env() -> Option<Env> {
     let tools = Tools {
         umu_run: Path::new(MANIFEST).join("tests/fake-umu-run"),
     };
-    let e = env_with(tools, rt, fast(), tempfile::tempdir().unwrap());
+    let mut e = env_with(tools, rt.path(), fast(), tempfile::tempdir().unwrap());
+    e._rt = Some(rt);
     std::fs::write(e.dir.as_path().join("setup.exe"), "MZ").unwrap();
     if rustix::process::geteuid().is_root() {
         match e.fake("exit:0") {

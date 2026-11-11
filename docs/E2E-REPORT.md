@@ -263,3 +263,112 @@ These flows were observed on screen and also checked in the DB, on disk or in th
 - The dependency run view keeps its process list after the run ends.
 - The e2e suite takes about 5 minutes and downloads GE-Proton unless `VORTEX_IT_GE` is set.
 - Not tested: real commercial installers (InstallShield, Inno, NSIS), games with DRM or anti-cheat, controllers, multi-GPU.
+
+# M16 wizard installer report
+
+A synthetic GUI installer for a fictional free game, "Lantern Hollow", goes through the full lifecycle
+in a real Proton prefix: wizard install, launch, the game's own two-phase uninstaller, and removal.
+Everything is built at test time from `crates/vortex-core/tests/fixtures/wizard/` (C sources and
+`build.sh`, mingw-w64). No binaries are committed.
+
+## Fixture
+
+- `setup_lantern_hollow.exe`: Win32 wizard with these pages: Welcome, License (Next stays disabled
+  until the box is ticked), Destination (`C:\Games\Lantern Hollow`), Installing and Finish ("Launch
+  now" unchecked). It reads a split archive (`-1.bin` and `-2.bin`, cut inside `data\world.dat`)
+  and checks a checksum for each entry. It also copies `manual/` and runs `redist\prereq_setup.exe`
+  twice: `/passive` (waited for) and `/finalize` (detached, finishes about 6 s after setup exits).
+  Then it writes the HKLM Uninstall key and installs `unins000.exe`. Exit codes: 0 success,
+  2 cancel, 3 missing or corrupt part (named in a message box).
+- `LH_AUTOCLICK=1` makes every window press its own buttons through the same handlers as a
+  mouse click. `LH_TRACE` names a log file that records each page shown and each button pressed.
+- `LanternHollow.exe` verifies `data\manifest.txt` and writes `%APPDATA%\LanternHollow\save.dat`.
+- `unins000.exe` has two phases, like Inno Setup. It copies itself to `%TEMP%\_lhXXXX.tmp`,
+  restarts from there and exits. The copy then asks Yes/No, deletes the install dir and the
+  registry key, and keeps the save.
+- Audio probe: setup (during Installing) and the game record `waveOutGetNumDevs`, an MMDevice
+  default-render query, and the `PlaySound` result.
+
+## Environment
+
+| | |
+|---|---|
+| Runtime | Proton Experimental `experimental-11.0-20261027b` |
+| umu | umu-launcher 1.4.4 |
+| Compiler | x86_64-w64-mingw32-gcc 16.2.0 |
+| GE-Proton | NOT RUN: no GE-Proton is installed (`compatibilitytools.d` is empty) |
+| Audio | PipeWire with two sinks (`pactl list short sinks`) |
+
+Reproduce:
+
+```sh
+VORTEX_IT_PROTON="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental" \
+  cargo test -p vortex-core --test e2e_wizard -- --ignored --test-threads=1
+```
+
+## Results (3 tests, 3 passed, 72 s)
+
+| | Scenario | Result | Evidence |
+|---|---|---|---|
+| a | Source detection | PASS | setup scores 90 and the prereq scores -80. Not ambiguous. |
+| b | Install, wait for the prereq and wineserver | PASS | The trace shows every page and every press in order (welcome next, license `next-ignored` while unticked, accept-on, next, install, finish). `next_enabled_before_accept=0`. `/finalize` wrote its file before SelectExe. Source tree hash is unchanged. The only exe candidate is `C:\Games\Lantern Hollow\LanternHollow.exe`. |
+| c | Launch | PASS | Exit 0, data verified, `save.dat` written, cwd is the game folder |
+| d | Game's uninstaller (the GUI's `launch::run_uninstaller`) | PASS (after #38) | Vortex lists the `%TEMP%\_lhXXXX.tmp /SECONDPHASE=...` copy and finishes only after phase 2. The install dir and the HKLM key are gone and `save.dat` is kept. The deletion plan then covers exactly the prefix. |
+| e | Missing `-2.bin` | PASS, diagnosis PARTIAL | Exit 3, InstallerFailure finding. The installer's own message names `setup_lantern_hollow-2.bin`, but no Vortex finding does, because Wine message boxes don't reach the log. Same limitation as M14 spec 18. |
+| f | Cancel | PASS | Exit 2, InstallerFailure (Code 2), game not installed |
+
+Audio (installers muted with `WINEDLLOVERRIDES=winepulse.drv,winealsa.drv,wineoss.drv=d`, #37):
+
+| | `waveOutGetNumDevs` | default render | `PlaySound` |
+|---|---|---|---|
+| Installer | 0 | none (`0x80070490`) | 0 (failed quietly; the installer still finished) |
+| Game | 3 to 4 | yes | n/a |
+
+Muting did not make the installer fail or hang.
+
+## GUI demonstration (release build, isolated XDG dirs, Hyprland)
+
+Every installer page was clicked by hand (mouse press and release with ydotool, no `LH_AUTOCLICK`).
+
+| Step | Observed | Screenshot |
+|---|---|---|
+| Empty library, open the wizard | yes | [01](screenshots/wizard/01-empty-library.png), [02](screenshots/wizard/02-wizard-start.png) |
+| Pick the source folder, installer detected | yes | [03](screenshots/wizard/03-pick-source-folder.png), [04](screenshots/wizard/04-wizard-installer.png) |
+| Name and runtime | yes | [05](screenshots/wizard/05-wizard-name-runtime.png) |
+| Creating the prefix (live log and processes) | yes (cropped by tiling) | [06](screenshots/wizard/06-vortex-creating-prefix.png) |
+| Welcome | yes | [07](screenshots/wizard/07-setup-welcome.png) |
+| License: Next clicked while unticked, nothing happens | yes | [08](screenshots/wizard/08-setup-license-next-disabled.png) |
+| License ticked | yes | [09](screenshots/wizard/09-setup-license-accepted.png) |
+| Destination | yes | [10](screenshots/wizard/10-setup-destination.png) |
+| Installing, with the prereq window | yes | [11](screenshots/wizard/11-setup-installing.png) |
+| Prereq window on its own | no: it closed before capture | none |
+| Finish | yes | [13](screenshots/wizard/13-setup-finish.png) |
+| Vortex waits for `/finalize` and wineserver | yes, by timestamps: `finalize.txt` at 08:22:50, run end at 08:23:01. The "Waiting" state was not on screen long enough to capture. | none |
+| Select exe, game added | yes | [14](screenshots/wizard/14-vortex-select-exe.png), [15](screenshots/wizard/15-vortex-done.png) |
+| Game page, Play, the game's uninstaller, Remove completely | **not verified in the GUI** | none |
+
+The last row is not verified because the owner came back to their workspace mid-demo. I stopped
+there instead of moving windows or workspaces under them. Those steps are covered headless by
+scenarios c and d and by the deletion plan check, which call the same `launch` and `delete`
+functions as the GUI buttons.
+
+## Bugs found
+
+| PR | Bug | Regression test |
+|---|---|---|
+| [#38](https://github.com/Nexusdeveloper902/Vortex/pull/38) | The game's uninstaller could not remove its own folder (`RemoveDirectory` error 32). Proton's `steam.exe` keeps the started program's folder open for the whole run. The uninstaller now starts through `start.exe /wait` from `C:\`. | `uninstaller_runs_muted_outside_its_folder`, e2e scenario d |
+
+Feature added during M16: [#37](https://github.com/Nexusdeveloper902/Vortex/pull/37) mutes the
+installer and uninstaller audio (unit test per run kind, and the audio table above).
+
+## Observations (not fixed)
+
+- After a cancelled prefix init, the wizard still says "The installer finished: choose the
+  executable" next to Retry.
+- With `HOME` set to an empty directory, Proton's `steam.exe` aborts during wineboot
+  (lsteamclient `steamclient_main.c:375 "!status"`). The GUI demo used the real `HOME` and
+  isolated XDG dirs.
+- Fixture cosmetic issue: the Welcome page body text is clipped.
+- `tests/launch.rs` leaves two small wrapper scripts in `$TMPDIR` per run (`vortex-m10-wt-PID`,
+  `vortex-m16-rec-PID`), because they live in a static that is never dropped.
+- Wine checkboxes ignore a synthetic click that has no hold between press and release.

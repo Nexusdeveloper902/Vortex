@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+  <rect width="240" height="160" fill="#181e3a"/>
+  <path d="M0 120 Q60 90 120 115 T240 100 V160 H0 Z" fill="#24304a"/>
+  <path d="M0 140 C80 130 160 150 240 135" stroke="#5a7aa0" stroke-width="6" fill="none"/>
+  <circle cx="50" cy="105" r="4" fill="#ffc440"/>
+  <circle cx="120" cy="112" r="4" fill="#ffc440"/>
+  <circle cx="190" cy="100" r="4" fill="#ffc440"/>
+  <rect x="160" y="80" width="18" height="14" fill="#3c3028"/>
+  <text x="152" y="76" font-size="9" fill="#f0e2be">old mill</text>
+</svg>

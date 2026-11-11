@@ -198,7 +198,7 @@ fn list_in(tools: &Tools, runtime: &HostPath, prefix: PrefixDir) -> Result<Vec<V
 /// Installs one verb into the environment (kind `winetricks`). `known` comes from [`list_verbs`].
 /// Returns `Ok(None)` when it is already installed (nothing is run). On `Finished`, before that
 /// event is forwarded, the `dependencies` row is written: `installed` if exit 0 and the verb is
-/// in `winetricks.log`, else `failed`.
+/// in `winetricks.log`, else `failed`. `verbose` adds Proton's own log (`RunSpec::verbose`).
 pub fn install_verb(
     runs: &Runs,
     db: &std::sync::Arc<Mutex<Db>>,
@@ -206,6 +206,7 @@ pub fn install_verb(
     env_id: i64,
     verb: &str,
     known: &[Verb],
+    verbose: bool,
 ) -> Result<Option<(RunHandle, Receiver<RunEvent>)>> {
     let verb = validate_verb(verb, known)?.to_string();
     let (_, prefix, runtime) = environment_of(paths, db, env_id)?;
@@ -229,6 +230,7 @@ pub fn install_verb(
         game_id: None,
         install_id: None,
         invocation,
+        verbose,
     })?;
     let (tx, out) = async_channel::bounded(1024);
     let (db, run_id) = (db.clone(), handle.run_id());

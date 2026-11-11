@@ -18,6 +18,10 @@ Vortex is not affiliated with Valve, Lutris or Bottles.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): modules, path kinds, the umu-run contract, the process
   lifecycle, the data schema and the security rules.
 - [`spec.md`](spec.md): the product specification.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): build, test and PR checklist.
+- [`SECURITY.md`](SECURITY.md): how to report a vulnerability privately.
+
+Found a bug or have an idea? Use the [issue templates](../../issues/new/choose).
 
 ## Install
 

@@ -287,6 +287,18 @@ marked PASS / FAIL / NOT RUN with evidence.
   requests, custom image set/remove, cover deleted with the game, v1 DB migrates. `real_steam_lookup`
   (`--ignored`, network). Manual: covers appear in grid, list and game page.
 
+## M25: Cleanup tools: backups, runtimes, logs
+
+- Scope: delete backups (Restore dialog), remove Vortex-downloaded runtimes (Runtimes page; refused when
+  in use or outside `runtimes/`), startup log retention (newest 20 runs per game, never running ones).
+  Details: ARCHITECTURE section 10.
+- Files: `delete.rs`, `logs.rs`, `db.rs` (`all_runs`), `vortex-gtk/src/{app.rs,ui/manage.rs,ui/runtimes.rs}`,
+  docs; tests in `tests/cleanup.rs`.
+- Deps: M17 (backups), runtimes page.
+- Acceptance: `tests/cleanup.rs` (delete backup removes file + row, outside-dir refused, symlink removed
+  as link, runtime in use / outside refused, runtime symlink target untouched, log prune keeps newest N
+  and running).
+
 ## M22: Careful artwork matching and pick dialog
 
 - Scope: `clean_query` strips build/edition/platform noise from the search term; matching ignores

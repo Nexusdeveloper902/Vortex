@@ -22,6 +22,12 @@ Runtimes. The `+` menu starts **Install a game** or **Add an existing game**. Ea
 tile, a status (Installing, Installed, Interrupted, Needs attention), and a page with Play, Configure,
 Run EXE/MSI, Dependencies, Logs, Back up, Restore and an overflow menu.
 
+Covers are downloaded automatically from Steam's public store: Vortex sends the game's name to
+Steam's store search and, when a title matches, saves its cover image. Games without a match keep the
+coloured placeholder. Turn this off in **Preferences** (Network, **Download artwork automatically**);
+offline mode turns it off too. The game page's overflow menu has **Refresh artwork**, **Choose
+image...** (your own JPEG or PNG) and **Remove artwork**.
+
 ## Install a game
 
 1. Choose **Install a game**, then pick the installer. You can pick a file (`.exe` or `.msi`) or a
@@ -193,6 +199,7 @@ All paths follow the XDG base directories. With default settings:
 | GE-Proton installed by Vortex | `~/.local/share/vortex/runtimes/` |
 | Backups | `~/.local/share/vortex/backups/` |
 | Logs | `~/.local/share/vortex/logs/<game or environment id>/<run id>-<kind>.log` |
+| Cover images | `~/.local/share/vortex/artwork/<game id>.img` |
 | Applications menu entries | `~/.local/share/applications/io.github.nexusdeveloper902.Vortex.game-<id>.desktop` |
 
 Vortex has no configuration file. Its settings are stored in the database. Your installer files and
@@ -233,8 +240,8 @@ to report the problem.
 - Installer candidates are looked for only in the install folder and the standard Program Files, GOG
   and Games folders inside the prefix. Use Browse for anything else.
 - The **Default install folder** and **Default prefix folder** preferences are saved but not used yet.
-  Offline mode only blocks runtime downloads.
+  Offline mode only blocks runtime and artwork downloads.
 - Winetricks has been checked for `win10` only.
-- Vortex is an early MVP. Metadata scraping, cloud saves, community recipes and gamepad configuration are
+- Vortex is an early MVP. Metadata other than cover art, cloud saves, community recipes and gamepad configuration are
   not implemented.
 - Verification status for real games and real installers is in `docs/E2E-REPORT.md`.

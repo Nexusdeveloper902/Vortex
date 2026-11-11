@@ -146,4 +146,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.tag.outputs.tag }}
-        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+        # release-please creates the release as a draft (with its tag, force-tag-creation); publish
+        # it only after every asset is attached, so nobody sees a release without packages.
+        run: |
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"

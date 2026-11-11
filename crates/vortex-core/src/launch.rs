@@ -209,7 +209,10 @@ fn exec_spec(
 
 /// Runs a game's own uninstaller (`unins*.exe`, no args) inside its environment. Like
 /// [`run_in_env`], but with the audio drivers disabled for the run's process tree (installers
-/// and uninstallers never play sound; ARCHITECTURE section 5).
+/// and uninstallers never play sound; ARCHITECTURE section 5), and with the prefix's `C:\` as the
+/// working directory: Proton's `steam.exe` wrapper keeps the run's Windows cwd open until the
+/// run ends, so a cwd inside the install folder makes the uninstaller's own removal of that
+/// folder fail with a sharing violation.
 pub fn run_uninstaller(
     runs: &Runs,
     db: &Mutex<Db>,
@@ -229,5 +232,6 @@ pub fn run_uninstaller(
     }
     let mut spec = exec_spec(db, paths, env_id, exe, vec![], vec![])?;
     spec.invocation.mute_audio = true;
+    spec.invocation.cwd = HostPath::new(spec.invocation.prefix.drive_c())?;
     runs.start(spec)
 }

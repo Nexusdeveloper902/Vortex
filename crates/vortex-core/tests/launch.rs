@@ -405,7 +405,7 @@ fn run_in_env_exe_and_msi() {
 }
 
 #[test]
-fn uninstaller_runs_muted_in_its_folder() {
+fn uninstaller_runs_muted_outside_its_folder() {
     if rustix::process::geteuid().is_root() {
         return; // spawning is refused as root (see fake_env)
     }
@@ -415,12 +415,21 @@ fn uninstaller_runs_muted_in_its_folder() {
     let e = env_with(tools, shared().runtime.path(), fast());
     let exe = e.dir.join("unins000.exe").unwrap();
     std::fs::write(exe.as_path(), "MZ").unwrap();
+    // No drive_c yet: refused before anything runs.
+    let r = run_uninstaller(&e.runs, &e.db, &e.paths, e.env_id, &exe).map(|_| ());
+    assert!(matches!(r, Err(Error::NotFound(_))), "{r:?}");
+    let c = e.prefix.drive_c();
+    std::fs::create_dir_all(&c).unwrap();
     let (h, rx) = run_uninstaller(&e.runs, &e.db, &e.paths, e.env_id, &exe).unwrap();
     assert_eq!(collect(&rx, T).exit, Some(Exit::Low8(0)));
-    let rec = std::fs::read_to_string(e.dir.as_path().join(".fake-rec")).unwrap();
+    // The cwd is the prefix's C:\, never the folder the uninstaller deletes.
+    let rec = std::fs::read_to_string(c.join(".fake-rec")).unwrap();
     let dir = e.dir.as_path().display();
-    assert_eq!(rec, format!("cwd={dir}\narg={dir}/unins000.exe\n"));
-    let env = std::fs::read_to_string(e.dir.as_path().join(".fake-rec.env")).unwrap();
+    assert_eq!(
+        rec,
+        format!("cwd={}\narg={dir}/unins000.exe\n", c.display())
+    );
+    let env = std::fs::read_to_string(c.join(".fake-rec.env")).unwrap();
     let overrides = env
         .lines()
         .find_map(|l| l.strip_prefix("WINEDLLOVERRIDES="))

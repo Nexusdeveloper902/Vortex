@@ -147,6 +147,10 @@ Command::new(tools.umu_run)                // default: "umu-run" resolved on PAT
   it; Wine then has no audio driver and reports no render device. It is per-run env only, never
   written to the prefix registry, so launches in the same prefix keep their sound. Launch,
   "Run EXE", winetricks and prefix-init runs are not muted.
+- **Uninstaller cwd [VL M16]**: `run_uninstaller` uses the prefix's `drive_c` as cwd, not the exe's
+  folder. Proton's `steam.exe` wrapper keeps the run's Windows cwd open until the run ends, so an
+  uninstaller that removes its own folder (two-phase, relaunched from `%TEMP%`) got
+  `ERROR_SHARING_VIOLATION` (32) on `RemoveDirectory` and left the folder behind.
 - **Built-ins by full path [VL M1 F1]**: with a bare name (`cmd`, `msiexec`) umu-run logs
   "Executable not found", passes the name through, and always exits 0, losing the real code. As
   `C:\windows\system32\cmd.exe` the code propagates (umu still logs the same benign warning).

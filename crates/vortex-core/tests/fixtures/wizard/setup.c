@@ -403,7 +403,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show_cmd) 
     bold = CreateFontA(-15, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 0, 0, "Tahoma");
     title = ctl("STATIC", "", 0, 180, 16, 304, 40, 0);
     SendMessageA(title, WM_SETFONT, (WPARAM)bold, TRUE);
-    body = ctl("STATIC", "", 0, 180, 62, 304, 70, 0);
+    body = ctl("STATIC", "", 0, 180, 62, 304, 240, 0); /* down to the separator at y=314 */
     size_t ln;
     unsigned char *lic = read_all("license.txt", &ln);
     license = ctl("EDIT", lic ? (char *)lic : "license.txt is missing.",

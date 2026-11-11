@@ -6,7 +6,7 @@
 //! `#[ignore]` tests (`it_*`) drive the real umu-run + Proton from `VORTEX_IT_PROTON`.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use vortex_core::db::{Db, GameStatus, InstallState, RunKind, RunState};
 use vortex_core::diagnose::Class;
@@ -30,14 +30,27 @@ fn write_exec(p: &Path, body: &str) {
 
 /// Fake Proton dir and umu wrapper, built once per test binary before anything is spawned.
 /// A child test process reuses its parent's (`CHILD_TOOLS`).
-fn fake_tools() -> &'static Path {
-    static T: OnceLock<PathBuf> = OnceLock::new();
-    static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
-    T.get_or_init(|| {
-        if let Ok(p) = std::env::var(CHILD_TOOLS) {
-            return PathBuf::from(p);
+/// Shared by concurrent tests; the dir is removed when the last holder drops (a static would
+/// never run `TempDir::drop`).
+struct FakeTools {
+    path: PathBuf,
+    _dir: Option<tempfile::TempDir>,
+}
+
+fn fake_tools() -> Arc<FakeTools> {
+    static T: Mutex<Weak<FakeTools>> = Mutex::new(Weak::new());
+    let mut slot = T.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(t) = slot.upgrade() {
+        return t;
+    }
+    let t = Arc::new(if let Ok(p) = std::env::var(CHILD_TOOLS) {
+        FakeTools {
+            path: PathBuf::from(p),
+            _dir: None,
         }
-        let d = DIR.get_or_init(|| tempfile::tempdir().unwrap()).path();
+    } else {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
         let rt = d.join("runtime");
         std::fs::create_dir_all(rt.join("files/bin")).unwrap();
         write_exec(&rt.join("proton"), "#!/bin/sh\nexit 0\n");
@@ -66,8 +79,13 @@ exit 2
                  FAKE_UMU_OUT=\"$PWD/.fake-rec\" exec '{MANIFEST}/tests/fake-umu-run' \"$@\"\n"
             ),
         );
-        d.to_path_buf()
-    })
+        FakeTools {
+            path: d.to_path_buf(),
+            _dir: Some(dir),
+        }
+    });
+    *slot = Arc::downgrade(&t);
+    t
 }
 
 fn fast() -> Timing {
@@ -87,11 +105,13 @@ struct T {
     runs: Arc<Runs>,
     inst: Installs,
     runtime: HostPath,
+    _tools: Arc<FakeTools>,
 }
 
 impl T {
     fn at(root: &Path, tmp: Option<tempfile::TempDir>) -> T {
-        let tools = fake_tools();
+        let fake = fake_tools();
+        let tools = &fake.path;
         let paths = Paths::under(root);
         let db = Arc::new(Mutex::new(Db::open(&paths.db_file()).unwrap()));
         let runs = Arc::new(
@@ -116,6 +136,7 @@ impl T {
             runs,
             inst,
             runtime: HostPath::new(tools.join("runtime")).unwrap(),
+            _tools: fake,
         }
     }
 
@@ -821,7 +842,7 @@ fn kill_app_mid_install(t: &T) -> String {
             "--test-threads=1",
         ])
         .env(CHILD_ROOT, &t.root)
-        .env(CHILD_TOOLS, fake_tools())
+        .env(CHILD_TOOLS, &fake_tools().path)
         .stdout(std::process::Stdio::null())
         .spawn()
         .unwrap();

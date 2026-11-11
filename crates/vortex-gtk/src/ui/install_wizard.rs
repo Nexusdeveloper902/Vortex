@@ -166,6 +166,7 @@ struct Wizard {
     status: gtk4::Label,
     findings: gtk4::ListBox,
     retry: gtk4::Button,
+    retry_verbose: gtk4::Button,
     select: gtk4::Button,
 }
 
@@ -250,6 +251,7 @@ impl Wizard {
                 .build(),
             findings,
             retry: pill("Retry", true),
+            retry_verbose: pill("Retry with verbose log", false),
             select: pill("The installer finished: choose the executable", false),
         })
     }
@@ -453,8 +455,10 @@ impl Wizard {
         col.append(&self.findings);
         col.append(&self.view.root);
         self.retry.set_visible(false);
+        self.retry_verbose.set_visible(false);
         self.select.set_visible(false);
         col.append(&self.retry);
+        col.append(&self.retry_verbose);
         col.append(&self.select);
         {
             let w = Rc::downgrade(self);
@@ -472,23 +476,26 @@ impl Wizard {
                     w.state.toast(&e.to_string());
                 }
             });
-            let w = Rc::downgrade(self);
-            self.retry.connect_clicked(move |_| {
-                up!(w);
-                match w.state.installs.retry(w.install_id.get()) {
-                    Ok(rx) => {
-                        w.view.reset();
-                        while let Some(c) = w.findings.first_child() {
-                            w.findings.remove(&c);
+            for (btn, verbose) in [(&self.retry, false), (&self.retry_verbose, true)] {
+                let w = Rc::downgrade(self);
+                btn.connect_clicked(move |_| {
+                    up!(w);
+                    match w.state.installs.retry(w.install_id.get(), verbose) {
+                        Ok(rx) => {
+                            w.view.reset();
+                            while let Some(c) = w.findings.first_child() {
+                                w.findings.remove(&c);
+                            }
+                            w.findings.set_visible(false);
+                            w.retry.set_visible(false);
+                            w.retry_verbose.set_visible(false);
+                            w.select.set_visible(false);
+                            w.consume(rx);
                         }
-                        w.findings.set_visible(false);
-                        w.retry.set_visible(false);
-                        w.select.set_visible(false);
-                        w.consume(rx);
+                        Err(e) => w.state.toast(&e.to_string()),
                     }
-                    Err(e) => w.state.toast(&e.to_string()),
-                }
-            });
+                });
+            }
             let w = Rc::downgrade(self);
             self.select.connect_clicked(move |_| {
                 up!(w);
@@ -513,6 +520,7 @@ impl Wizard {
         self.dialog.set_can_close(resting);
         let (retry, select) = offered_actions(s, self.installer_ran.get());
         self.retry.set_visible(retry);
+        self.retry_verbose.set_visible(retry);
         self.select.set_visible(select);
         if resting {
             self.view.stop_btn.set_sensitive(false);

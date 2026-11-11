@@ -1139,3 +1139,48 @@ fn walk(dir: &Path, depth: usize, f: &mut dyn FnMut(&Path, u64, i64)) {
         }
     }
 }
+
+/// `unins*.exe` files (case-insensitive) up to `depth` levels below each root. Symlinks are skipped.
+pub fn find_uninstallers(roots: &[PathBuf], depth: usize) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let Ok(t) = e.file_type() else { continue };
+            let p = e.path();
+            if t.is_dir() && depth > 0 {
+                walk(&p, depth - 1, out);
+            } else if t.is_file() {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                if n.starts_with("unins") && n.ends_with(".exe") {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for r in roots {
+        walk(r, depth, &mut out);
+    }
+    out.sort();
+    out
+}
+
+#[cfg(test)]
+mod unins_tests {
+    use super::*;
+
+    #[test]
+    fn uninstaller_detection() {
+        let d = std::env::temp_dir().join(format!("vortex-unins-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("bin")).unwrap();
+        std::fs::write(d.join("bin/UNINS000.EXE"), b"").unwrap();
+        std::fs::write(d.join("game.exe"), b"").unwrap();
+        let found = find_uninstallers(std::slice::from_ref(&d), 2);
+        assert_eq!(found, vec![d.join("bin/UNINS000.EXE")]);
+        assert!(find_uninstallers(&[d.join("nope")], 2).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}

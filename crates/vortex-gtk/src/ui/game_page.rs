@@ -557,7 +557,7 @@ fn overflow(
             })
             .collect(),
     };
-    let found = dialogs::find_uninstallers(&roots, 3);
+    let found = vortex_core::install::find_uninstallers(&roots, 3);
     let group = gio::SimpleActionGroup::new();
     let un = gio::SimpleAction::new("uninstaller", None);
     un.set_enabled(g.status == GameStatus::Installed && !found.is_empty());

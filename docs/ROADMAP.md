@@ -51,6 +51,7 @@ File ownership (a milestone edits only its files; anything else goes to a separa
 | M13 | `packaging/**`, `data/**`, `README.md`, `docs/USER.md` |
 | M14 | `docs/E2E-REPORT.md`, fixes via small follow-up PRs |
 | M22 | `artwork.rs`, `migrations/0003_artwork_candidates.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/artwork_search.rs`; tiny edits to `db.rs`, `game_page.rs`, `install_wizard.rs` |
+| M24 | `packaging/smoke.sh`, `packaging/make-tarball.sh`, `.github/workflows/release.yml`, `README.md`, `docs/RELEASING.md` |
 | M17 | `artwork.rs`, `migrations/0002_artwork.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/cover.rs`; small edits to `paths.rs`, `db.rs` (appended), `delete.rs` (remove cover with the game), `library.rs`, `game_page.rs`, `settings.rs`, `game_object.rs` |
 
 `db.rs`: M2 implements typed queries for the entire v1 schema. Later milestones that need another
@@ -320,6 +321,17 @@ marked PASS / FAIL / NOT RUN with evidence.
   "Dark Souls 3 dev build" finds "DARK SOULS III" via the cleaned query, ambiguous records candidates
   and attaches nothing, pick by app id, opt-out and installing games make zero requests;
   `real_steam_dark_souls_3_dev_build` (`--ignored`, network) -> app 374320.
+
+## M24: Package install smoke tests
+
+- Scope: `packaging/smoke.sh` installs each built package in its target distro container and checks
+  `ldd` has no `not found`, `.desktop`/metainfo/icons exist, `desktop-file-validate` and
+  `appstreamcli validate --no-net`, and that the binary (non-root, no display) fails with GTK's
+  "Failed to open display" and no loader/symbol error. `release.yml` job `smoke` runs it and
+  `publish` needs it. Tarball INSTALL.txt/README no longer ask for host winetricks.
+- Files: see the ownership table. Deps: M13.
+- Acceptance: the script passes against the v0.4.0 assets on debian:trixie, ubuntu:25.04,
+  fedora:latest, archlinux (tarball) and debian:trixie (tarball); the PR records results.
 
 ## M18: First-run tool check (sonnet)
 

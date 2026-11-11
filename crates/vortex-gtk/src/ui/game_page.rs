@@ -126,6 +126,9 @@ fn build(state: &Rc<AppState>, id: i64) -> vortex_core::error::Result<adw::Navig
 
     let info = adw::PreferencesGroup::builder().title("Details").build();
     info.add(&row("Status", status_label(g.status.as_str())));
+    if let Some(t) = crate::ui::artwork_search::status_line(&state.db(), id) {
+        info.add(&row("Artwork", &t));
+    }
     info.add(&row("Proton", &env.runtime_path));
     info.add(&folder_row(state, "Prefix", Some(&env.prefix_path)));
     info.add(&folder_row(
@@ -576,6 +579,8 @@ fn overflow(
     for (name, f) in [
         ("art-refresh", refresh_artwork as fn(&Rc<AppState>, i64)),
         ("art-choose", choose_artwork),
+        ("art-search", crate::ui::artwork_search::open),
+        ("art-lookup", toggle_auto_lookup),
         ("art-remove", remove_artwork),
     ] {
         let a = gio::SimpleAction::new(name, None);
@@ -585,7 +590,22 @@ fn overflow(
     }
     let art = gio::Menu::new();
     art.append(Some("Refresh artwork"), Some("game.art-refresh"));
+    art.append(Some("Search Steam..."), Some("game.art-search"));
     art.append(Some("Choose image..."), Some("game.art-choose"));
+    let opted_out = state
+        .db()
+        .get_artwork(g.id)
+        .ok()
+        .flatten()
+        .is_some_and(|a| a.source == vortex_core::db::ArtSource::None);
+    art.append(
+        Some(if opted_out {
+            "Allow automatic artwork lookup"
+        } else {
+            "Don't look up artwork for this game"
+        }),
+        Some("game.art-lookup"),
+    );
     art.append(Some("Remove artwork"), Some("game.art-remove"));
     let un_menu = gio::Menu::new();
     un_menu.append(Some("Run the game's uninstaller"), Some("game.uninstaller"));
@@ -674,6 +694,21 @@ fn choose_artwork(state: &Rc<AppState>, id: i64) {
             artwork::set_custom(&db, &paths, id, &file).map(Some)
         });
     });
+}
+
+/// Opt out of (or back into) automatic lookups; takes effect now, nothing is queried here.
+fn toggle_auto_lookup(state: &Rc<AppState>, id: i64) {
+    let db = state.db();
+    let r = match db.get_artwork(id) {
+        Ok(Some(a)) if a.source == vortex_core::db::ArtSource::None => {
+            artwork::allow_auto(&db, id).map(|()| "Automatic lookup allowed again")
+        }
+        Ok(None) => artwork::opt_out(&db, id).map(|()| "Artwork will not be looked up"),
+        Ok(Some(_)) => Ok("This game already has a cover; Remove artwork first"),
+        Err(e) => Err(e),
+    };
+    drop(db);
+    state.toast(&r.map_or_else(|e| e.to_string(), String::from));
 }
 
 fn remove_artwork(state: &Rc<AppState>, id: i64) {

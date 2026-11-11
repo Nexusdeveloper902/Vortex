@@ -5,7 +5,7 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use vortex_core::artwork::{self, Sources};
-use vortex_core::db::{ArtKind, ArtSource, Db, NewGame};
+use vortex_core::db::{ArtKind, ArtSource, Db, GameStatus, NewGame};
 use vortex_core::error::Error;
 use vortex_core::paths::{HostPath, Paths};
 
@@ -65,12 +65,20 @@ fn search(json: &'static str) -> Route {
 
 const PORTAL: &str = r#"{"total":2,"items":[{"type":"app","name":"Portal 2","id":620},{"type":"app","name":"Portal 2 Soundtrack","id":9}]}"#;
 
+/// `installed`: the only status background lookups consider.
+fn game(name: &str, env: i64) -> NewGame {
+    let mut g = NewGame::new(name, env);
+    g.status = GameStatus::Installed;
+    g.exe_path = Some("/g/game.exe".into());
+    g
+}
+
 fn setup(name: &str) -> (tempfile::TempDir, Paths, Arc<Mutex<Db>>, i64) {
     let tmp = tempfile::tempdir().unwrap();
     let paths = Paths::under(tmp.path());
     let db = Db::open(&paths.db_file()).unwrap();
     let env = db.insert_environment("/p/1", true, "/rt").unwrap();
-    let id = db.insert_game(&NewGame::new(name, env)).unwrap();
+    let id = db.insert_game(&game(name, env)).unwrap();
     (tmp, paths, Arc::new(Mutex::new(db)), id)
 }
 
@@ -235,7 +243,7 @@ fn spawn_auto_sends_updates_for_unlooked_games() {
     let (_t, paths, db, a) = setup("Portal 2");
     let b = {
         let d = db.lock().unwrap();
-        d.insert_game(&NewGame::new("Nothing Like It", 1)).unwrap()
+        d.insert_game(&game("Nothing Like It", 1)).unwrap()
     };
     let ids = db.lock().unwrap().games_without_artwork().unwrap();
     assert_eq!(ids, [a, b]);
@@ -338,7 +346,7 @@ fn v1_database_migrates() {
     let id = {
         let db = Db::open(&paths.db_file()).unwrap();
         let env = db.insert_environment("/p/1", true, "/rt").unwrap();
-        db.insert_game(&NewGame::new("Old", env)).unwrap()
+        db.insert_game(&game("Old", env)).unwrap()
     };
     // Simulate a v1 file: drop the v2 table and version.
     let c = rusqlite_conn(&paths);
@@ -346,7 +354,7 @@ fn v1_database_migrates() {
         .unwrap();
     drop(c);
     let db = Db::open(&paths.db_file()).unwrap();
-    assert_eq!(db.user_version().unwrap(), 2);
+    assert_eq!(db.user_version().unwrap(), 3);
     assert_eq!(db.games_without_artwork().unwrap(), [id]);
     let mut bak = paths.db_file().into_os_string();
     bak.push(".bak-v1");
@@ -366,4 +374,174 @@ fn real_steam_lookup() {
     assert_eq!(img.steam_app, 620);
     assert_eq!(img.kind, ArtKind::Portrait);
     assert!(artwork::is_image(&img.bytes));
+}
+
+const DS3: &str = r#"{"total":3,"items":[
+ {"type":"app","name":"DARK SOULS™ III Soundtrack","id":9},
+ {"type":"app","name":"DARK SOULS™ III - The Ringed City","id":8},
+ {"type":"app","name":"DARK SOULS™ III","id":374320}]}"#;
+
+#[test]
+fn dirty_name_is_cleaned_and_matches_roman_numerals() {
+    let s = serve(|p| match p {
+        _ if p.starts_with("/search?term=Dark%20Souls%203&") => Some(search(DS3)),
+        "/apps/374320/library_600x900_2x.jpg" => Some((200, "image/jpeg", JPEG.to_vec())),
+        _ => None,
+    });
+    let (_t, paths, db, id) = setup("Dark Souls 3 dev build");
+    assert!(
+        artwork::fetch(&db, &paths, &s.src, id, false)
+            .unwrap()
+            .is_some()
+    );
+    let row = db.lock().unwrap().get_artwork(id).unwrap().unwrap();
+    assert_eq!((row.source, row.steam_app), (ArtSource::Auto, Some(374320)));
+    // the dev-build wording never left the machine
+    let seen = s.paths_seen.lock().unwrap().clone();
+    assert!(seen[0].contains("term=Dark%20Souls%203&"), "{seen:?}");
+}
+
+const AMBIGUOUS: &str = r#"{"total":3,"items":[
+ {"type":"app","name":"Project Alpha Remastered","id":1},
+ {"type":"app","name":"Project Alpha 2","id":2},
+ {"type":"app","name":"Project Alpha Soundtrack","id":3}]}"#;
+
+#[test]
+fn ambiguous_is_not_attached_and_records_candidates() {
+    let s = serve(|p| p.starts_with("/search?").then(|| search(AMBIGUOUS)));
+    let (_t, paths, db, id) = setup("Project_Alpha_Beta_0.9");
+    assert_eq!(
+        artwork::fetch(&db, &paths, &s.src, id, false).unwrap(),
+        None
+    );
+    let row = db.lock().unwrap().get_artwork(id).unwrap().unwrap();
+    assert_eq!(
+        (row.source, row.steam_app, row.candidates),
+        (ArtSource::None, None, 2)
+    );
+    assert_eq!(s.hits.load(Ordering::SeqCst), 1, "no image request");
+    assert!(!paths.artwork_file(id).exists());
+    // not queried again by background passes
+    assert!(
+        db.lock()
+            .unwrap()
+            .games_without_artwork()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn pick_by_app_id_attaches_that_app_even_when_auto_is_off() {
+    let s = serve(|p| match p {
+        "/apps/620/library_600x900_2x.jpg" => Some((200, "image/jpeg", JPEG.to_vec())),
+        _ => None,
+    });
+    let (_t, paths, db, id) = setup("Whatever Internal Name");
+    db.lock()
+        .unwrap()
+        .set_setting(artwork::KEY_AUTO, "0")
+        .unwrap();
+    let app = artwork::parse_app_id("https://store.steampowered.com/app/620/Portal_2/").unwrap();
+    artwork::pick(&db, &paths, &s.src, id, app).unwrap();
+    let row = db.lock().unwrap().get_artwork(id).unwrap().unwrap();
+    assert_eq!((row.source, row.steam_app), (ArtSource::Auto, Some(620)));
+    assert_eq!(std::fs::read(paths.artwork_file(id)).unwrap(), JPEG);
+    // offline mode still blocks everything
+    db.lock()
+        .unwrap()
+        .set_setting(artwork::KEY_OFFLINE, "1")
+        .unwrap();
+    let n = s.hits.load(Ordering::SeqCst);
+    assert!(artwork::pick(&db, &paths, &s.src, id, 620).is_err());
+    assert!(artwork::search_manual(&db, &s.src, "x").is_err());
+    assert_eq!(s.hits.load(Ordering::SeqCst), n);
+}
+
+#[test]
+fn manual_search_returns_base_games_first() {
+    let s = serve(|p| {
+        p.starts_with("/search?term=Dark%20Souls&")
+            .then(|| search(DS3))
+    });
+    let (_t, _paths, db, _id) = setup("x");
+    let r = artwork::search_manual(&db, &s.src, "Dark Souls").unwrap();
+    assert_eq!(r[0].0, 8);
+    assert_eq!(r.last().unwrap().0, 9);
+}
+
+#[test]
+fn opt_out_and_installing_games_make_zero_requests() {
+    let s = serve(|_| Some(search(DS3)));
+    let (_t, paths, db, id) = setup("Secret Title");
+    // an installing game (the wizard before confirm) is invisible to background passes
+    let installing = {
+        let d = db.lock().unwrap();
+        d.insert_game(&NewGame::new("Under NDA", 1)).unwrap()
+    };
+    assert_eq!(db.lock().unwrap().games_without_artwork().unwrap(), [id]);
+    assert_eq!(
+        artwork::fetch(&db, &paths, &s.src, installing, false).unwrap(),
+        None
+    );
+    // opt-out before the pass: the pass skips it
+    artwork::opt_out(&db.lock().unwrap(), id).unwrap();
+    assert!(
+        db.lock()
+            .unwrap()
+            .games_without_artwork()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        artwork::fetch(&db, &paths, &s.src, id, false).unwrap(),
+        None
+    );
+    let rx = artwork::spawn_auto(db.clone(), paths.clone(), s.src.clone(), vec![id]);
+    assert!(rx.recv_blocking().is_err());
+    assert_eq!(s.hits.load(Ordering::SeqCst), 0);
+    // allowing again makes it eligible; opt-out never clobbers an existing row
+    artwork::allow_auto(&db.lock().unwrap(), id).unwrap();
+    assert_eq!(db.lock().unwrap().games_without_artwork().unwrap(), [id]);
+}
+
+#[test]
+#[ignore = "network: queries Steam's store search and CDN"]
+fn real_steam_dark_souls_3_dev_build() {
+    let img = artwork::find(&Sources::default(), "Dark Souls 3 dev build")
+        .unwrap()
+        .expect("confident match");
+    assert_eq!(img.steam_app, 374320);
+    assert!(artwork::is_image(&img.bytes));
+}
+
+#[test]
+fn failed_and_cancelled_installs_are_never_looked_up() {
+    let s = serve(|_| Some(search(DS3)));
+    let (_t, paths, db, _id) = setup("Installed One");
+    let mut ids = vec![];
+    for (name, st, optout) in [
+        ("Failed NDA", GameStatus::Failed, true),
+        ("Interrupted NDA", GameStatus::Interrupted, true),
+        ("Failed plain", GameStatus::Failed, false),
+        ("Installing plain", GameStatus::Installing, false),
+    ] {
+        let d = db.lock().unwrap();
+        let mut g = NewGame::new(name, 1);
+        g.status = st;
+        let id = d.insert_game(&g).unwrap();
+        if optout {
+            artwork::opt_out(&d, id).unwrap();
+        }
+        ids.push(id);
+    }
+    // only the installed game is eligible
+    assert_eq!(db.lock().unwrap().games_without_artwork().unwrap().len(), 1);
+    for id in ids {
+        assert_eq!(
+            artwork::fetch(&db, &paths, &s.src, id, false).unwrap(),
+            None
+        );
+    }
+    assert_eq!(s.hits.load(Ordering::SeqCst), 0);
 }

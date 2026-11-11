@@ -550,10 +550,26 @@ prefix to an older Proton is refused without explicit confirmation (prefix `vers
   store.steampowered.com/api/storesearch/?term=<name>&l=english&cc=US` (JSON `items[].id/name`), then
   `shared.steamstatic.com/store_item_assets/steam/apps/<appid>/` `library_600x900_2x.jpg`, then
   `library_600x900.jpg` (portrait), then `header.jpg` (landscape). The game's name is the only data sent.
-- Matching (`artwork::best_match`): names normalized (lowercase, no ™®© or apostrophes, punctuation
-  to spaces, leading "the" dropped). Any exact match wins; otherwise only the first result, and only
-  when its title before a `:`/` - ` subtitle matches. Anything else is no match: the placeholder is
-  better than the wrong cover.
+- Query (M22, `artwork::clean_query`): the game name minus build/edition/platform/installer noise
+  (whole words, case-insensitive; brackets holding noise dropped; `_`, `.` and lone `-` are
+  separators). Only version-looking numbers go (a dot, or `v`/`b`/`r`/`build` prefix); a plain
+  number never does, and the first word is kept (except installer words). That term is what is sent.
+- Matching (`artwork::classify`): names normalized (lowercase, no ™®© or apostrophes, `&` = and,
+  punctuation to spaces, leading "the" dropped, roman I-XX = arabic on non-first tokens). Extras
+  (names with soundtrack, ost, dlc, demo, season pass, artbook; the store's `type` is `app` for all
+  of them) are ignored while a base game is present. `Confident` = any exact match, else the first
+  result whose title before a `:`/` - ` subtitle matches: only this is attached. Otherwise
+  `Candidates(up to 10)`: nothing attached, `artwork` row `none` with `candidates = N` (migration
+  0003) so the UI says "N possible matches"; no results is plain `none`.
+- Manual pick (`artwork::search_manual`, `pick`): the GTK "Search Steam..." dialog searches (term
+  prefilled, sent only on user action), or takes a store URL / app id (`parse_app_id`), downloads that
+  app's art and records `auto` with `steam_app` = the choice. Allowed when `artwork_auto = "0"`,
+  refused in offline mode. No thumbnails: the search JSON's image URLs are not fetched.
+- Opt-out (NDA): an `artwork` row `none` written before any lookup (`opt_out`, `opt_out_install`;
+  menu toggle `allow_auto` deletes the row). The wizard switch is on the first step and persisted
+  right after `begin` creates the game. Fail closed: only `installed` games are looked up
+  (`games_without_artwork`, non-forced `fetch`), so failed, cancelled, interrupted and installing
+  games never send their name, whichever wizard button ends the flow.
 - Checks: 20 s timeout, redirects refused, Content-Type `image/jpeg|png` and JPEG/PNG magic bytes,
   5 MB cap (1 MB for the search JSON, 20 MB for a user-picked file). Written as `.tmp-<id>` then renamed.
 - State: no `artwork` row = never looked up; the GTK library starts one background pass per game per

@@ -13,6 +13,7 @@ use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use vortex_core::artwork;
 use vortex_core::db::{InstallState, RunKind};
 use vortex_core::diagnose::Finding;
 use vortex_core::install::{
@@ -406,6 +407,11 @@ impl Wizard {
         list.append(&combo);
         list.append(&loc);
         list.append(&advanced);
+        let skip = adw::SwitchRow::builder()
+            .title("Don't look up artwork for this game")
+            .subtitle("Its name is never sent to Steam (NDA titles)")
+            .build();
+        list.append(&skip);
         col.append(&list);
         col.append(&gtk4::Label::builder().label("Install folder: choose this folder in the installer (drive Z: shows your Linux folders); Vortex creates it if needed and looks there for the game. Leave it empty to use the installer's default location inside the prefix.\nPrefix location: an empty or new folder. Leave it empty to use Vortex's own prefixes folder. Vortex never deletes a prefix at a custom location.").css_classes(["dim-label", "caption"]).wrap(true).xalign(0.0).build());
         let go = pill("Install", true);
@@ -443,10 +449,19 @@ impl Wizard {
                 Err(e) => return w.state.toast(&e.to_string()),
             };
             b.set_sensitive(false);
-            let (w, b) = (w.clone(), b.clone());
+            let (w, b, skip) = (w.clone(), b.clone(), skip.is_active());
             glib::spawn_future_local(async move {
                 let installs = w.state.installs.clone();
-                let res = blocking(move || installs.begin(req)).await;
+                let db = w.state.db.clone();
+                let res = blocking(move || {
+                    let s = installs.begin(req)?;
+                    if skip {
+                        // Right at creation; installing games are not looked up meanwhile.
+                        artwork::opt_out_install(&db, s.install_id)?;
+                    }
+                    Ok::<_, vortex_core::error::Error>(s)
+                })
+                .await;
                 b.set_sensitive(true);
                 match res {
                     Some(Ok(s)) => {
@@ -753,12 +768,17 @@ pub fn open_existing(state: &Rc<AppState>) {
             });
         });
     }
+    let skip = adw::SwitchRow::builder()
+        .title("Don't look up artwork for this game")
+        .subtitle("Its name is never sent to Steam (NDA titles)")
+        .build();
     let list = boxed();
     for w in [
         name.upcast_ref::<gtk4::Widget>(),
         exe_row.upcast_ref(),
         combo.upcast_ref(),
         prefix.upcast_ref(),
+        skip.upcast_ref(),
     ] {
         list.append(w);
     }
@@ -807,10 +827,21 @@ pub fn open_existing(state: &Rc<AppState>) {
                 Ok(r) => r,
                 Err(e) => return state.toast(&e.to_string()),
             };
-            let (state, dialog) = (state.clone(), dialog.clone());
+            let (state, dialog, skip) = (state.clone(), dialog.clone(), skip.is_active());
             glib::spawn_future_local(async move {
                 let installs = state.installs.clone();
-                match blocking(move || installs.register_existing(req)).await {
+                let db = state.db.clone();
+                let res = blocking(move || {
+                    let r = installs.register_existing(req)?;
+                    if skip {
+                        // Before the library refresh that follows can look the game up.
+                        let db = db.lock().unwrap_or_else(|e| e.into_inner());
+                        artwork::opt_out(&db, r.game_id)?;
+                    }
+                    Ok::<_, vortex_core::error::Error>(r)
+                })
+                .await;
+                match res {
                     Some(Ok(r)) => {
                         dialog.close();
                         state.nav.pop_to_tag("library");

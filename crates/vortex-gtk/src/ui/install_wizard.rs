@@ -22,6 +22,13 @@ use vortex_core::install::{
 use vortex_core::paths::{HostPath, folder_name};
 use vortex_core::source::{self, SourceAnalysis};
 
+/// Sets a path into a folder entry with the cursor at the end, so a long path shows its last part
+/// (the folder name); the full path is the row's tooltip (see `folder_row`).
+fn set_path_text(row: &adw::EntryRow, text: &str) {
+    row.set_text(text);
+    row.set_position(-1);
+}
+
 /// Fills `row` with `<setting key>/<folder named after the game>` when the setting is set, and
 /// keeps it in step with the name until the user edits the row.
 fn follow_name(state: &AppState, name: &adw::EntryRow, row: &adw::EntryRow, key: &str) {
@@ -34,12 +41,12 @@ fn follow_name(state: &AppState, name: &adw::EntryRow, row: &adw::EntryRow, key:
     }
     let value = move |n: &str| base.join(folder_name(n)).to_string_lossy().into_owned();
     let last = RefCell::new(value(&name.text()));
-    row.set_text(&last.borrow());
+    set_path_text(row, &last.borrow());
     let row = row.clone();
     name.connect_changed(move |n| {
         if row.text() == *last.borrow() {
             let v = value(&n.text());
-            row.set_text(&v);
+            set_path_text(&row, &v);
             *last.borrow_mut() = v;
         }
     });
@@ -501,10 +508,15 @@ impl Wizard {
             up!(w);
             let r = r.clone();
             dialogs::pick_folder(&w.state, pick_title, move |p| {
-                r.set_text(&p.to_string_lossy())
+                set_path_text(&r, &p.to_string_lossy())
             });
         });
         row.add_suffix(&browse);
+        // the start of a long path is scrolled out of view; show all of it on hover
+        row.connect_changed(|r| {
+            let t = r.text();
+            r.set_tooltip_text((!t.is_empty()).then_some(t.as_str()));
+        });
         row
     }
 

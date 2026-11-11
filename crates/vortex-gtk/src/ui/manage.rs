@@ -284,7 +284,9 @@ pub fn restore_dialog(state: &Rc<AppState>, env_id: i64) {
         .build();
     let scroll = gtk4::ScrolledWindow::builder().child(&list).build();
     let d = dialog("Restore a backup", &scroll);
+    let state_for_delete = state.clone();
     for b in backups {
+        let b2_id = b.id;
         let row = adw::ActionRow::builder()
             .title(when(b.created_at))
             .subtitle(human_size(b.size_bytes.max(0) as u64))
@@ -329,6 +331,54 @@ pub fn restore_dialog(state: &Rc<AppState>, env_id: i64) {
                 },
             );
         });
+        let del = gtk4::Button::builder()
+            .icon_name("user-trash-symbolic")
+            .tooltip_text("Delete this backup")
+            .valign(gtk4::Align::Center)
+            .build();
+        let (state3, row2, list2) = (state_for_delete.clone(), row.clone(), list.clone());
+        let id = b2_id;
+        del.connect_clicked(move |_| {
+            let (state, row, list) = (state3.clone(), row2.clone(), list2.clone());
+            let plan = match state
+                .db()
+                .get_backup(id)
+                .and_then(|_| delete::plan_backup_removal(&state.db(), &state.paths, id))
+            {
+                Ok(p) => p,
+                Err(e) => return state.toast(&e.to_string()),
+            };
+            let body = format!(
+                "{} ({}) will be deleted. This cannot be undone.",
+                plan.item.path.as_path().display(),
+                human_size(plan.item.bytes)
+            );
+            confirm(
+                &state3,
+                "Delete this backup?",
+                &body,
+                "Delete",
+                true,
+                move || {
+                    let (state, plan, row, list) =
+                        (state.clone(), plan.clone(), row.clone(), list.clone());
+                    glib::spawn_future_local(async move {
+                        match with_db(&state, move |db, paths| {
+                            delete::execute_cleanup(db, paths, &plan)
+                        })
+                        .await
+                        {
+                            Ok(()) => {
+                                list.remove(&row);
+                                state.toast("Backup deleted");
+                            }
+                            Err(e) => state.toast(&e.to_string()),
+                        }
+                    });
+                },
+            );
+        });
+        row.add_suffix(&del);
         row.add_suffix(&btn);
         list.append(&row);
     }
@@ -449,6 +499,10 @@ fn log_viewer(state: &Rc<AppState>, path: &str, title: &str) {
         .await;
         buf.set_text(&match text {
             Some(Ok(t)) => t,
+            Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                "This log was removed by automatic cleanup (Vortex keeps the last 20 runs)."
+                    .to_string()
+            }
             Some(Err(e)) => format!("Could not read the log: {e}"),
             None => return,
         });

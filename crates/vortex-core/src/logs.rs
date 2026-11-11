@@ -3,7 +3,7 @@
 //! Every line from a child process must pass through [`redact`] before it reaches a file or the UI;
 //! [`LogWriter`] does this for the file, UI code calls `redact` itself.
 
-use crate::db::RunKind;
+use crate::db::{RunKind, RunState};
 use crate::error::{Error, Result};
 use crate::paths::{Paths, create_private_dir};
 use std::borrow::Cow;
@@ -322,6 +322,48 @@ pub fn redact_file(path: &Path) -> Result<()> {
         let _ = std::fs::remove_file(&tmp);
     }
     r.map_err(Error::io(path))
+}
+
+/// Runs kept per log directory (game, or environment for game-less runs).
+pub const KEEP_RUNS_PER_OWNER: usize = 20;
+
+/// Deletes the log file (and verbose Proton log dir) of every run beyond the newest `keep` in its
+/// log directory. Never touches a running/waiting run. Only paths directly inside a
+/// `<logs_dir>/<owner>/` directory are removed: a log is a file at a fixed managed path (like the
+/// artwork cache), so no `DeletionPlan` is shown. Run rows stay; the viewer reports a missing file.
+/// Returns the number of runs pruned.
+pub fn prune(db: &crate::db::Db, paths: &Paths, keep: usize) -> Result<usize> {
+    let root = std::fs::canonicalize(paths.logs_dir()).unwrap_or_else(|_| paths.logs_dir());
+    let mut seen: std::collections::HashMap<PathBuf, usize> = Default::default();
+    let mut pruned = 0;
+    for r in db.all_runs()? {
+        let log = Path::new(&r.log_path);
+        let Some(dir) = log.parent().and_then(|d| std::fs::canonicalize(d).ok()) else {
+            continue;
+        };
+        if dir.parent() != Some(root.as_path()) {
+            continue;
+        }
+        let n = seen.entry(dir).or_default();
+        *n += 1;
+        if *n <= keep || matches!(r.state, RunState::Running | RunState::Waiting) {
+            continue;
+        }
+        let mut removed = false;
+        if std::fs::symlink_metadata(log).is_ok_and(|m| !m.is_dir())
+            && std::fs::remove_file(log).is_ok()
+        {
+            removed = true;
+        }
+        let pd = proton_log_dir(log);
+        if std::fs::symlink_metadata(&pd).is_ok_and(|m| m.is_dir())
+            && std::fs::remove_dir_all(&pd).is_ok()
+        {
+            removed = true;
+        }
+        pruned += usize::from(removed);
+    }
+    Ok(pruned)
 }
 
 #[cfg(test)]

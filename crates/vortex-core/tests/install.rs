@@ -463,7 +463,15 @@ fn source_removed_mid_install_is_missing_installer_data() {
             event: RunEvent::Phase(Phase::Running),
             kind: RunKind::Install,
         } => {
-            std::fs::remove_dir_all(src.as_path()).unwrap();
+            // The fake umu-run may still be writing its .fake-rec files into the folder (cwd):
+            // remove_dir_all can then fail with ENOTEMPTY, so retry until it is gone.
+            for _ in 0..50 {
+                if std::fs::remove_dir_all(src.as_path()).is_ok() || !src.as_path().exists() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(!src.as_path().exists());
         }
         InstallEvent::Finding(f) if f.class == Class::MissingInstallerData && !finished => {
             finding_while_running = true;

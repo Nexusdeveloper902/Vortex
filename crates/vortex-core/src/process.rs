@@ -312,8 +312,8 @@ impl Runs {
             e
         };
 
-        let owner = spec.game_id.unwrap_or(spec.env_id);
-        let mut log = LogWriter::create(&self.paths, owner, run_id, spec.kind).map_err(fail)?;
+        let mut log = LogWriter::create(&self.paths, spec.game_id, spec.env_id, run_id, spec.kind)
+            .map_err(fail)?;
         db.set_run_log_path(run_id, &log.path().to_string_lossy())
             .map_err(fail)?;
         let verbose_dir = if spec.verbose {

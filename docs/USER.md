@@ -204,6 +204,7 @@ Vortex has two different removal actions. The overflow menu on the game page hol
   - The Wine prefix, but only if no other game uses it and it is in Vortex's own prefixes folder.
     A prefix at a custom location or an adopted prefix is listed under "Vortex will NOT delete these
     folders" instead.
+  - The game's run logs (`logs/game-<id>/`), and the prefix's own logs when the prefix goes too.
   - Folders you chose yourself (outside Vortex's `games` folder) are never deleted. They are listed
     under "Vortex will NOT delete these folders", so you can remove them yourself.
   - Installer files and folders you picked are never touched. Adopted prefixes are never touched.
@@ -236,7 +237,7 @@ When a run fails, **Retry with verbose log** runs it again with Proton's logging
 
 The verbose run sets `PROTON_LOG=1`, `UMU_LOG=debug` and `WINEDEBUG=+seh,+loaddll,warn+file` (unless
 the game's own environment variables set `WINEDEBUG`; yours wins). Proton writes its log next to the run
-log, in `~/.local/share/vortex/logs/<id>/<run id>-<kind>.proton/steam-0.log`. It is usually tens of KB.
+log, in `~/.local/share/vortex/logs/game-<id>/<run id>-<kind>.proton/steam-0.log`. It is usually tens of KB.
 Vortex redacts it when the run ends and again when you open it. In **Logs**, a verbose run has a
 **Proton log** button.
 
@@ -274,8 +275,8 @@ All paths follow the XDG base directories. With default settings:
 | Install folders created by Vortex | `~/.local/share/vortex/games/` |
 | GE-Proton installed by Vortex | `~/.local/share/vortex/runtimes/` |
 | Backups | `~/.local/share/vortex/backups/` |
-| Logs | `~/.local/share/vortex/logs/<game or environment id>/<run id>-<kind>.log` |
-| Proton logs of verbose runs | `~/.local/share/vortex/logs/<game or environment id>/<run id>-<kind>.proton/` |
+| Logs | `~/.local/share/vortex/logs/game-<game id>/<run id>-<kind>.log` (runs without a game: `logs/env-<environment id>/`) |
+| Proton logs of verbose runs | next to the run log, `<run id>-<kind>.proton/` |
 | Cover images | `~/.local/share/vortex/artwork/<game id>.img` |
 | Applications menu entries | `~/.local/share/applications/io.github.nexusdeveloper902.Vortex.game-<id>.desktop` |
 

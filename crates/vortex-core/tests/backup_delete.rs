@@ -6,6 +6,7 @@ use vortex_core::backup::{backup, restore, restore_limited};
 use vortex_core::db::*;
 use vortex_core::delete::*;
 use vortex_core::error::Error;
+use vortex_core::logs::{LogWriter, Stream};
 use vortex_core::paths::Paths;
 
 fn setup() -> (tempfile::TempDir, Paths, Db) {
@@ -198,6 +199,66 @@ fn deleting_a_leaves_b_intact() {
     assert!(pb.as_path().join("drive_c/Games/save.dat").exists());
     assert!(db.get_game(gb).is_ok());
     assert!(db.get_game(ga).is_err());
+}
+
+/// Writes one run's log through `LogWriter` (as `Runs::start` does) and records the run row.
+fn log_run(db: &Db, paths: &Paths, env: i64, game: Option<i64>, text: &str) -> std::path::PathBuf {
+    let id = db
+        .insert_run(&NewRun {
+            marker: format!("m-{text}"),
+            kind: RunKind::Launch,
+            environment_id: env,
+            game_id: game,
+            install_id: None,
+            argv: "[]".into(),
+            log_path: String::new(),
+        })
+        .unwrap();
+    db.finish_run(id, RunState::Finished, Some(0), false).unwrap();
+    let mut w = LogWriter::create(paths, game, env, id, RunKind::Launch).unwrap();
+    w.line(Stream::Stdout, text).unwrap();
+    w.flush().unwrap();
+    db.set_run_log_path(id, &w.path().to_string_lossy()).unwrap();
+    w.path().to_path_buf()
+}
+
+#[test]
+fn game_logs_are_planned_and_a_reused_id_starts_with_an_empty_log_dir() {
+    let (_t, paths, db) = setup();
+    let (env, g) = game(&db, &paths, "Old");
+    let old = log_run(&db, &paths, env, Some(g), "old game");
+    let old_env = log_run(&db, &paths, env, None, "old env");
+    let plan = plan_game_removal(&db, &paths, g).unwrap();
+    for l in [&old, &old_env] {
+        let dir = fs::canonicalize(l.parent().unwrap()).unwrap();
+        assert!(
+            plan.items.iter().any(|i| i.path.as_path() == dir),
+            "{} not in plan",
+            dir.display()
+        );
+    }
+    execute(&db, &paths, &plan).unwrap();
+    assert!(!old.exists() && !old_env.exists());
+
+    // SQLite hands out the deleted ids again (INTEGER PRIMARY KEY without AUTOINCREMENT)
+    let (env2, g2) = game(&db, &paths, "New");
+    assert_eq!((env2, g2), (env, g), "ids are reused");
+    let new = log_run(&db, &paths, env2, Some(g2), "new game");
+    let dir: Vec<_> = fs::read_dir(new.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(dir, [new.clone()], "only the new run's log");
+    assert_eq!(fs::read_to_string(&new).unwrap(), "O|new game\n");
+
+    // a game sharing its environment: only the game's logs go, the environment's stay
+    let other = db.insert_game(&NewGame::new("Other", env2)).unwrap();
+    let env_log = log_run(&db, &paths, env2, None, "shared env");
+    let plan = plan_game_removal(&db, &paths, g2).unwrap();
+    assert!(!plan.remove_env);
+    execute(&db, &paths, &plan).unwrap();
+    assert!(!new.exists() && env_log.exists());
+    assert!(db.get_game(other).is_ok());
 }
 
 #[test]

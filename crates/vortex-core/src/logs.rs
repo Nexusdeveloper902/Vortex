@@ -213,29 +213,50 @@ pub enum Stream {
     Stderr,
 }
 
-/// One log file per run: `data/logs/<owner>/<run_id>-<kind>.log`, where `owner` is the game id,
-/// or the environment id for runs without a game. Lines are `O|` / `E|` prefixed and redacted.
+/// Log directory of a run's owner: `data/logs/game-<id>/` for a game's runs, `data/logs/env-<id>/`
+/// for runs without a game. The prefixes keep the two id spaces apart, so removing a game's log
+/// directory (`delete::plan_game_removal`) never touches an environment's logs.
+pub fn owner_dir(paths: &Paths, game_id: Option<i64>, env_id: i64) -> PathBuf {
+    let name = match game_id {
+        Some(g) => format!("game-{g}"),
+        None => format!("env-{env_id}"),
+    };
+    paths.logs_dir().join(name)
+}
+
+/// One log file per run: `<owner_dir>/<run_id>-<kind>.log`. Lines are `O|` / `E|` prefixed and
+/// redacted.
 pub struct LogWriter {
     path: PathBuf,
     out: BufWriter<File>,
 }
 
 impl LogWriter {
-    pub fn log_path(paths: &Paths, owner: i64, run_id: i64, kind: RunKind) -> PathBuf {
-        paths
-            .logs_dir()
-            .join(owner.to_string())
-            .join(format!("{run_id}-{}.log", kind.as_str()))
+    pub fn log_path(
+        paths: &Paths,
+        game_id: Option<i64>,
+        env_id: i64,
+        run_id: i64,
+        kind: RunKind,
+    ) -> PathBuf {
+        owner_dir(paths, game_id, env_id).join(format!("{run_id}-{}.log", kind.as_str()))
     }
 
-    pub fn create(paths: &Paths, owner: i64, run_id: i64, kind: RunKind) -> Result<Self> {
-        let path = Self::log_path(paths, owner, run_id, kind);
+    /// Creates the log file. An existing file is never reused or truncated (`create_new`): a run
+    /// id that SQLite handed out again can never write into an older run's log.
+    pub fn create(
+        paths: &Paths,
+        game_id: Option<i64>,
+        env_id: i64,
+        run_id: i64,
+        kind: RunKind,
+    ) -> Result<Self> {
+        let path = Self::log_path(paths, game_id, env_id, run_id, kind);
         let dir = path.parent().unwrap_or(Path::new("."));
         create_private_dir(dir)?;
         let f = std::fs::OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(0o600)
             .open(&path)
             .map_err(Error::io(&path))?;
@@ -534,7 +555,7 @@ mod tests {
     fn writer_redacts_and_tags() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = Paths::under(tmp.path());
-        let mut w = LogWriter::create(&paths, 3, 9, RunKind::Launch).unwrap();
+        let mut w = LogWriter::create(&paths, Some(3), 1, 9, RunKind::Launch).unwrap();
         w.header(&[("argv", "run API_KEY=x")]).unwrap();
         w.line(Stream::Stdout, "hello").unwrap();
         w.line(Stream::Stderr, "Bearer tok").unwrap();
@@ -544,7 +565,11 @@ mod tests {
             s,
             "argv: run API_KEY=<redacted>\n--\nO|hello\nE|Bearer <redacted>\n"
         );
-        assert!(w.path().ends_with("logs/3/9-launch.log"));
+        assert!(w.path().ends_with("logs/game-3/9-launch.log"));
+        // never reuses an existing log file
+        assert!(LogWriter::create(&paths, Some(3), 1, 9, RunKind::Launch).is_err());
+        let e = LogWriter::create(&paths, None, 3, 9, RunKind::Launch).unwrap();
+        assert!(e.path().ends_with("logs/env-3/9-launch.log"));
         use std::os::unix::fs::PermissionsExt;
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(w.path()), 0o600);

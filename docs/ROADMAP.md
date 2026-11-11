@@ -53,6 +53,7 @@ File ownership (a milestone edits only its files; anything else goes to a separa
 | M22 | `artwork.rs`, `migrations/0003_artwork_candidates.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/artwork_search.rs`; tiny edits to `db.rs`, `game_page.rs`, `install_wizard.rs` |
 | M23 | `docs/E2E-REPORT.md` (M23 section), `docs/screenshots/walkthrough/**`, small fixes in `vortex-gtk` |
 | M24 | `packaging/smoke.sh`, `packaging/make-tarball.sh`, `.github/workflows/release.yml`, `README.md`, `docs/RELEASING.md` |
+| M28 | `migrations/0005_artwork_opt_out.sql`; small edits to `logs.rs`, `process.rs`, `delete.rs`, `artwork.rs`, `db.rs` (appended), `tests/{backup_delete,artwork,launch,cleanup,db}.rs`, `vortex-gtk/src/ui/{dialogs,run_view,install_wizard,game_page,artwork_search}.rs`, docs |
 | M17 | `artwork.rs`, `migrations/0002_artwork.sql`, `tests/artwork.rs`, `vortex-gtk/src/ui/cover.rs`; small edits to `paths.rs`, `db.rs` (appended), `delete.rs` (remove cover with the game), `library.rs`, `game_page.rs`, `settings.rs`, `game_object.rs` |
 
 `db.rs`: M2 implements typed queries for the entire v1 schema. Later milestones that need another
@@ -387,6 +388,24 @@ dependency run; a **Proton log** button in Logs.
   `vortex-gtk/src/{app.rs,ui/dialogs.rs,ui/game_page.rs,ui/install_wizard.rs}`.
 - Deps: M16, M17, M19, M21, M22.
 - Acceptance: PASS / FAIL / NOT RUN per step with screenshots in the E2E report.
+
+## M28: Walkthrough fixes and real winetricks verbs
+
+- Scope: the five M23 "not fixed" observations (deletion text with nothing to delete, "Starting"
+  on a resumed install, no-match vs. disabled artwork lookup, log dirs left behind and reused run
+  ids, the install-folder entry), and real redistributable verbs through umu + GE-Proton.
+- Log dirs: `logs/game-<id>/` and `logs/env-<id>/` (separate id spaces); a game's dir is a
+  `DeletionPlan` item, and the environment's when it goes too. `LogWriter::create` uses
+  `create_new`. Chosen over `AUTOINCREMENT`, which needs a rebuild of `runs` (referenced by
+  `dependencies`) for the same result.
+- Artwork: migration 0005 `artwork.opted_out`; `artwork::lookup_state`; the game page menu is
+  refilled each time it opens.
+- Files: see the ownership table. Deps: M23, M25, M22.
+- Acceptance: `tests/backup_delete.rs`
+  `game_logs_are_planned_and_a_reused_id_starts_with_an_empty_log_dir` (deleted game's id reused,
+  first run's log dir holds only the new log); `tests/artwork.rs` lookup states; `dialogs::tests::
+  plan_text`; real `it_winetricks_real_verbs` (`vcrun2022`, `d3dx9`, `corefonts`, each in a fresh
+  prefix with GE-Proton from `runtime_ge`), results in the E2E report.
 
 ## Top risks (details: ARCHITECTURE section 14)
 

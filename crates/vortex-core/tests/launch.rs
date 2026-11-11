@@ -879,11 +879,9 @@ fn it_verbose_launch_names_the_missing_data_file() {
     assert!(!f.evidence[0].contains(".dll") && !f.evidence[0].contains(".manifest"));
 }
 
-#[test]
-#[ignore = "needs real umu-run, network (GE-Proton download) or VORTEX_IT_GE"]
-fn it_winetricks_with_ge_proton() {
-    let tmp = tempfile::tempdir().unwrap();
-    let ge = match std::env::var("VORTEX_IT_GE") {
+/// `VORTEX_IT_GE`, or the latest GE-Proton installed by `runtime_ge` under `tmp`.
+fn ge_runtime(tmp: &Path) -> HostPath {
+    match std::env::var("VORTEX_IT_GE") {
         Ok(d) => HostPath::new(d).unwrap(),
         Err(_) => {
             let rel = vortex_core::runtime_ge::latest_release().expect("latest GE-Proton release");
@@ -891,13 +889,20 @@ fn it_winetricks_with_ge_proton() {
             let (tx, _rx) = async_channel::unbounded();
             vortex_core::runtime_ge::install(
                 &rel,
-                &tmp.path().join("runtimes"),
+                &tmp.join("runtimes"),
                 &tx,
                 &std::sync::atomic::AtomicBool::new(false),
             )
             .unwrap()
         }
-    };
+    }
+}
+
+#[test]
+#[ignore = "needs real umu-run, network (GE-Proton download) or VORTEX_IT_GE"]
+fn it_winetricks_with_ge_proton() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ge = ge_runtime(tmp.path());
     let e = env_with(Tools::default(), ge.as_path(), Timing::default());
     init_prefix(&e);
     // Prefix B must stay untouched.
@@ -939,6 +944,60 @@ fn it_winetricks_with_ge_proton() {
         std::fs::read_to_string(b.join("winetricks.log")).unwrap(),
         "vcrun2019\n"
     );
+}
+
+/// Real redistributable verbs (M28), each in its own fresh prefix. Needs network: winetricks
+/// downloads the installers. `VORTEX_IT_VERBS=a,b` overrides the list. Every verb runs; the test
+/// fails at the end if any did not install.
+#[test]
+#[ignore = "needs real umu-run, network (redistributables, GE-Proton or VORTEX_IT_GE)"]
+fn it_winetricks_real_verbs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ge = ge_runtime(tmp.path());
+    let verbs =
+        std::env::var("VORTEX_IT_VERBS").unwrap_or_else(|_| "vcrun2022,d3dx9,corefonts".into());
+    let verbose = std::env::var_os("VORTEX_IT_VERBOSE").is_some();
+    let mut failed = Vec::new();
+    for verb in verbs.split(',') {
+        let e = env_with(Tools::default(), ge.as_path(), Timing::default());
+        let t0 = std::time::Instant::now();
+        init_prefix(&e);
+        let init = t0.elapsed();
+        let known = winetricks::list_verbs(&Tools::default(), &e.runtime, &e.paths).unwrap();
+        let t1 = std::time::Instant::now();
+        let (h, rx) =
+            winetricks::install_verb(&e.runs, &e.db, &e.paths, e.env_id, verb, &known, verbose)
+                .unwrap()
+                .unwrap();
+        let o = collect(&rx, Duration::from_secs(3600));
+        let took = t1.elapsed();
+        let log =
+            std::fs::read_to_string(e.prefix.as_path().join("winetricks.log")).unwrap_or_default();
+        let listed = winetricks::installed(&e.prefix).unwrap().contains(verb);
+        let dep = e.db.lock().unwrap().list_dependencies(e.env_id).unwrap();
+        let ok = o.exit == Some(Exit::Low8(0))
+            && listed
+            && dep
+                .iter()
+                .any(|d| d.verb == verb && d.state == DepState::Installed)
+            && scan_marker(h.marker()).is_empty();
+        eprintln!(
+            "VERB {verb}: {} exit {:?}, prefix init {:.0?}, verb {:.0?}, winetricks.log: {:?}",
+            if ok { "PASS" } else { "FAIL" },
+            o.exit,
+            init,
+            took,
+            log.lines().collect::<Vec<_>>()
+        );
+        if !ok {
+            let run = e.db.lock().unwrap().get_run(h.run_id()).unwrap();
+            let l = std::fs::read_to_string(&run.log_path).unwrap_or_default();
+            let tail: Vec<_> = l.lines().rev().take(40).collect();
+            eprintln!("run log tail (newest first):\n{}", tail.join("\n"));
+            failed.push(verb.to_string());
+        }
+    }
+    assert!(failed.is_empty(), "verbs not installed: {failed:?}");
 }
 
 #[test]

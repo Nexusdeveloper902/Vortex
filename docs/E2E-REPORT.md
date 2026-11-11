@@ -401,18 +401,73 @@ Vortex or Wine window only. The throwaway dir was 1.9 GiB at the end and was del
 | `fix(gtk/game)` | B: the "Last launch" row was computed once per page and stayed "Never" after a launch ended. It is re-read when the run finishes. | GTK only, not re-run live |
 | `fix(gtk/wizard)` | C: the exe page's flat button "The installer failed" read like a status message; now "Mark the install as failed". | label only |
 
-### Observations (not fixed)
+### Observations (not fixed in M23; all fixed in M28)
 
-- Deletion dialog with nothing to delete and a kept custom prefix says both "No files will be
-  deleted" and "The Wine prefix of this game is removed too, unless it is listed below" (shot 44).
-- The interrupted-install dialog's Status row says "Starting" under an "Interrupted" heading (52).
-- A game whose lookup found no match (`none`) offers "Allow automatic artwork lookup", the same as an
-  NDA opt-out; the game page menu is built once and does not change after a lookup.
-- `logs/<run id>` dirs are not removed by Remove completely; run ids restart after runs are deleted,
-  so a new run can share a dir with an old one.
-- The wizard's install-folder entry shows the end of the path, so its start is cut ("/jperez/...").
+- FIXED (M28, `fix(gtk/dialogs)`): deletion dialog with nothing to delete and a kept custom prefix
+  said both "No files will be deleted" and "The Wine prefix of this game is removed too, unless it
+  is listed below" (shot 44). With nothing to delete it no longer mentions removing the prefix; with
+  items it says "deleted only if it is listed above". Test: `dialogs::tests::plan_text`.
+- FIXED (M28, `fix(gtk/wizard)`): the interrupted-install dialog's Status row said "Starting" under
+  an "Interrupted" heading (52). A resumed install shows "Not running" until Retry. GTK only, not
+  re-run live.
+- FIXED (M28, `fix(gtk/game)`): a game whose lookup found no match (`none`) offered "Allow automatic
+  artwork lookup", the same as an NDA opt-out, and the menu was built once. Migration 0005 adds
+  `artwork.opted_out`; `artwork::lookup_state` tells NotLookedUp / HasImage / NoMatch / Disabled;
+  the menu is refilled every time it opens ("No match found: Search Steam..." vs. "Allow automatic
+  artwork lookup"), and Details shows "No match found on Steam" or "lookup is off". Tests:
+  `tests/artwork.rs`. Rows from before M28 read as "no match".
+- FIXED (M28, `fix(core/delete)`): log dirs were not removed by Remove completely, and SQLite reuses
+  the highest deleted game/run id, so a new game could log into an old game's dir. Logs now live in
+  `logs/game-<id>/` / `logs/env-<id>/` (separate id spaces, so deleting one never hits the other);
+  the plan lists the game's log dir, and the environment's when it goes too; `LogWriter::create`
+  uses `create_new` (an existing file is never reused). Chosen over `AUTOINCREMENT`, which needs a
+  rebuild of `runs` (referenced by `dependencies`). Test: `tests/backup_delete.rs`
+  `game_logs_are_planned_and_a_reused_id_starts_with_an_empty_log_dir`. Pre-M28 `logs/<id>/` dirs
+  are left alone (pruned by retention only).
+- FIXED (M28, `fix(gtk/wizard)`): the wizard's install-folder entry cut the start of a long path. Paths
+  set into the install and prefix folder entries put the cursor at the end (the folder name stays in
+  view) and the full path is the row's tooltip. GTK only, not re-run live.
 - Method: Hyprland 0.57 needs Lua dispatch (`hl.dsp.cursor.move`, `hl.dsp.focus`); XWayland
   ignores a click without a real pointer motion first; `wtype` garbles text in Wine edits with a
   Latin American layout, so Wine fields were filled by clipboard paste (this overwrote the desktop
   clipboard). `~/.local/share/umu` was symlinked into the isolated `XDG_DATA_HOME` to avoid a
   second steamrt download.
+
+## M28 real winetricks verbs (umu + GE-Proton)
+
+`it_winetricks_real_verbs` (`tests/launch.rs`, `--ignored`): GE-Proton11-12 downloaded by
+`runtime_ge::install` into a throwaway dir, then each verb in its own fresh prefix (`wineboot -u`
+through Vortex's runner), `winetricks::install_verb`, and checks exit 0, the verb in the prefix's
+`winetricks.log`, the `dependencies` row `installed`, no process left with the run's marker. umu-launcher
+1.4.4, steamrt4. `XDG_CACHE_HOME` pointed at an empty dir, so winetricks downloaded every
+redistributable fresh (vcrun2022 38 MB, directx9 96 MB, corefonts 3.8 MB). `it_winetricks_with_ge_proton`
+(`win10`, prefix B untouched) ran in the same session. All throwaway dirs were deleted afterwards.
+
+| Verb | Result | Prefix init | Verb run | `winetricks.log` |
+|---|---|---|---|---|
+| `vcrun2022` | PASS | 26 s | 15 s | `vcrun2022` |
+| `d3dx9` | PASS | 23 s | 11 s | `d3dx9` |
+| `corefonts` | PASS | 16 s | 36 s | `andale arial comicsans courier georgia impact times trebuchet verdana webdings corefonts` |
+| `win10` (existing test) | PASS | | | |
+
+Whole run 470 s, both tests passed.
+
+First attempt: FAIL for all three verbs, `curl: (77) error setting certificate file: /etc/ssl/cert.pem`.
+That came from the test harness, not from Vortex: cargo exports `SSL_CERT_FILE=/etc/ssl/cert.pem` and
+`SSL_CERT_DIR` (openssl-probe) into the test process. umu passes them into the steamrt4 container,
+which has no `/etc/ssl/cert.pem`, so winetricks' curl fails. The same verbs run with `umu-run`
+outside cargo passed. The passing run set `SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+SSL_CERT_DIR=/etc/ssl/certs` (valid on the Arch host and inside steamrt4). A user whose desktop
+environment sets `SSL_CERT_FILE` to a host-only path would hit the same failure; Vortex does not
+clear it (not changed here, noted as a follow-up).
+
+Run:
+
+```sh
+SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt SSL_CERT_DIR=/etc/ssl/certs \
+  TMPDIR=<throwaway>/tmp XDG_CACHE_HOME=<throwaway>/cache \
+  cargo test -p vortex-core --test launch it_winetricks -- --ignored --nocapture --test-threads=1
+```
+
+`VORTEX_IT_VERBS=a,b` changes the list, `VORTEX_IT_VERBOSE=1` runs them verbose, `VORTEX_IT_GE=<dir>`
+skips the download.

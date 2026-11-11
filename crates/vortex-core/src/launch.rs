@@ -209,7 +209,12 @@ fn exec_spec(
 
 /// Runs a game's own uninstaller (`unins*.exe`, no args) inside its environment. Like
 /// [`run_in_env`], but with the audio drivers disabled for the run's process tree (installers
-/// and uninstallers never play sound; ARCHITECTURE section 5).
+/// and uninstallers never play sound; ARCHITECTURE section 5), and started as
+/// `C:\windows\system32\start.exe /wait <exe>` from the prefix's `C:\`. Proton's `steam.exe`
+/// wrapper holds the directory of the program umu-run starts (and the run's cwd) open until the
+/// run ends; with the uninstaller started directly, an uninstaller that removes its own folder
+/// (two-phase, relaunched from `%TEMP%`) fails with a sharing violation and leaves it behind.
+/// `start /wait` returns the uninstaller's exit code.
 pub fn run_uninstaller(
     runs: &Runs,
     db: &Mutex<Db>,
@@ -227,7 +232,20 @@ pub fn run_uninstaller(
             exe.as_path().display()
         )));
     }
+    if !exe.as_path().is_file() {
+        return Err(Error::NotFound(format!(
+            "uninstaller {}",
+            exe.as_path().display()
+        )));
+    }
     let mut spec = exec_spec(db, paths, env_id, exe, vec![], vec![])?;
-    spec.invocation.mute_audio = true;
+    let inv = &mut spec.invocation;
+    inv.mute_audio = true;
+    inv.program = Program::System(SystemExe::Start);
+    inv.args = vec![
+        "/wait".into(),
+        to_win(&inv.prefix, exe).as_str().to_string(),
+    ];
+    inv.cwd = HostPath::new(inv.prefix.drive_c())?;
     runs.start(spec)
 }

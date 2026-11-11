@@ -320,7 +320,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- default_
 CREATE TABLE environments (
   id             INTEGER PRIMARY KEY,
   prefix_path    TEXT NOT NULL UNIQUE,          -- PrefixDir (WINEPREFIX)
-  prefix_managed INTEGER NOT NULL CHECK (prefix_managed IN (0,1)),  -- 1 = Vortex created it
+  prefix_managed INTEGER NOT NULL CHECK (prefix_managed IN (0,1)),  -- 1 = Vortex created it in data/prefixes
   runtime_path   TEXT NOT NULL,                 -- absolute Proton dir (PROTONPATH)
   created_at     INTEGER NOT NULL
 );
@@ -455,7 +455,16 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
    inside a managed root (`data/prefixes`, `data/runtimes`, `data/backups`, `data/logs`) or (b) a
    recorded `install_dir` with `install_dir_managed=1`; and it is not `/`, `$HOME`, a managed root
    itself, or an ancestor of another environment's prefix or install dir. The original installer
-   source is never in a plan. `std::fs::remove_dir_all` does not follow symlinks (prefixes contain
+   source is never in a plan. A `prefix_managed=0` prefix is never an item; when its environment is
+   removed it is listed in the plan's `manual` (shown as "Vortex will NOT delete").
+   Custom locations (M21, spec 4): the wizard may create a prefix outside `data/prefixes`
+   (`paths::check_prefix_location`: empty or missing dir, parent exists and is writable, not `/` or
+   `$HOME`, not inside `data/`, not inside or around a known prefix). It is recorded
+   `prefix_managed=0`: Vortex created it, but a user-chosen location is outside every managed root,
+   so rule (a) cannot vouch for it and deletion stays limited to `data/prefixes`. Likewise a missing
+   install dir outside `data/games` is created (`paths::new_dir_location`) with
+   `install_dir_managed=0`. Restore refuses targets outside `data/prefixes`, so such a prefix can be
+   backed up but not restored. `std::fs::remove_dir_all` does not follow symlinks (prefixes contain
    `dosdevices/z: -> /`); tests assert that a symlink to an outside dir survives deletion.
 6. Backups: `tar::Builder` with `follow_symlinks(false)` (mandatory: `z:` -> `/`). Restore unpacks into
    `data/prefixes/.restore-<id>/`, rejects absolute paths, `..`, and entries written through a symlink,
@@ -468,7 +477,8 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
    images, no API key, no redirects followed, never when turned off or in offline mode.
 8. No secrets in logs (section 10). Vortex never writes to `~/.wine`, the user's Steam dirs, or any
    prefix it did not create, except when the user explicitly points an environment at it
-   (`prefix_managed=0`; never deleted by Vortex).
+   (`prefix_managed=0`; never deleted by Vortex), or chooses a custom location for a new prefix
+   (rule 5; also `prefix_managed=0`).
 9. No DRM/anti-cheat circumvention features.
 
 ## 12. Threading model

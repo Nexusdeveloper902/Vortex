@@ -3,6 +3,7 @@
 
 use crate::app::{AppState, blocking};
 use crate::ui::dialogs::{self, finding_text, install_state_label, is_resting, runtime_combo};
+use crate::ui::settings::{KEY_INSTALL_DIR, KEY_PREFIX_DIR};
 use crate::ui::{game_page, run_view::RunView};
 use async_channel::Receiver;
 use gtk4::glib;
@@ -17,8 +18,31 @@ use vortex_core::diagnose::Finding;
 use vortex_core::install::{
     ExeCandidate, InstallEvent, InstallRequest, RegisterEnv, RegisterRequest,
 };
-use vortex_core::paths::HostPath;
+use vortex_core::paths::{HostPath, folder_name};
 use vortex_core::source::{self, SourceAnalysis};
+
+/// Fills `row` with `<setting key>/<folder named after the game>` when the setting is set, and
+/// keeps it in step with the name until the user edits the row.
+fn follow_name(state: &AppState, name: &adw::EntryRow, row: &adw::EntryRow, key: &str) {
+    let Some(base) = state.db().get_setting(key).ok().flatten() else {
+        return;
+    };
+    let base = PathBuf::from(base.trim());
+    if !base.is_absolute() {
+        return;
+    }
+    let value = move |n: &str| base.join(folder_name(n)).to_string_lossy().into_owned();
+    let last = RefCell::new(value(&name.text()));
+    row.set_text(&last.borrow());
+    let row = row.clone();
+    name.connect_changed(move |n| {
+        if row.text() == *last.borrow() {
+            let v = value(&n.text());
+            row.set_text(&v);
+            *last.borrow_mut() = v;
+        }
+    });
+}
 
 /// Suggested game name from the picked file or folder.
 pub fn guess_name(p: &Path) -> String {
@@ -368,32 +392,22 @@ impl Wizard {
                 .unwrap_or_default(),
         );
         let (combo, runtimes) = runtime_combo(&self.state, None);
-        let loc = adw::EntryRow::builder()
-            .title("Install folder (optional, must exist)")
+        let loc = self.folder_row("Install folder (optional)", "Install folder");
+        follow_name(&self.state, &name, &loc, KEY_INSTALL_DIR);
+        let pfx = self.folder_row("Prefix location (optional)", "Prefix location");
+        follow_name(&self.state, &name, &pfx, KEY_PREFIX_DIR);
+        let advanced = adw::ExpanderRow::builder()
+            .title("Advanced")
+            .subtitle("Where the Wine prefix is created")
             .build();
-        let browse = gtk4::Button::builder()
-            .icon_name("folder-open-symbolic")
-            .valign(gtk4::Align::Center)
-            .css_classes(["flat"])
-            .tooltip_text("Choose folder")
-            .build();
-        {
-            let (w, loc) = (Rc::downgrade(self), loc.clone());
-            browse.connect_clicked(move |_| {
-                up!(w);
-                let loc = loc.clone();
-                dialogs::pick_folder(&w.state, "Install folder", move |p| {
-                    loc.set_text(&p.to_string_lossy())
-                });
-            });
-        }
-        loc.add_suffix(&browse);
+        advanced.add_row(&pfx);
         let list = boxed();
         list.append(&name);
         list.append(&combo);
         list.append(&loc);
+        list.append(&advanced);
         col.append(&list);
-        col.append(&gtk4::Label::builder().label("Leave the folder empty to let the installer use its default location inside the game's prefix.").css_classes(["dim-label", "caption"]).wrap(true).xalign(0.0).build());
+        col.append(&gtk4::Label::builder().label("Install folder: choose this folder in the installer (drive Z: shows your Linux folders); Vortex creates it if needed and looks there for the game. Leave it empty to use the installer's default location inside the prefix.\nPrefix location: an empty or new folder. Leave it empty to use Vortex's own prefixes folder. Vortex never deletes a prefix at a custom location.").css_classes(["dim-label", "caption"]).wrap(true).xalign(0.0).build());
         let go = pill("Install", true);
         col.append(&go);
         let w = Rc::downgrade(self);
@@ -410,18 +424,18 @@ impl Wizard {
             else {
                 return;
             };
-            let loc_text = loc.text().trim().to_string();
+            let opt = |r: &adw::EntryRow| {
+                let t = r.text().trim().to_string();
+                (!t.is_empty()).then(|| HostPath::new(&t)).transpose()
+            };
             let req = (|| {
                 Ok::<_, vortex_core::error::Error>(InstallRequest {
                     name: name.text().to_string(),
                     source: HostPath::new(&src)?,
                     installer: inst,
                     runtime: rt,
-                    install_dir: if loc_text.is_empty() {
-                        None
-                    } else {
-                        Some(HostPath::new(&loc_text)?)
-                    },
+                    install_dir: opt(&loc)?,
+                    prefix: opt(&pfx)?,
                 })
             })();
             let req = match req {
@@ -446,6 +460,27 @@ impl Wizard {
             });
         });
         step("Name and location", &col, true)
+    }
+
+    /// Folder entry with a Browse button.
+    fn folder_row(self: &Rc<Self>, title: &str, pick_title: &'static str) -> adw::EntryRow {
+        let row = adw::EntryRow::builder().title(title).build();
+        let browse = gtk4::Button::builder()
+            .icon_name("folder-open-symbolic")
+            .valign(gtk4::Align::Center)
+            .css_classes(["flat"])
+            .tooltip_text("Choose folder")
+            .build();
+        let (w, r) = (Rc::downgrade(self), row.clone());
+        browse.connect_clicked(move |_| {
+            up!(w);
+            let r = r.clone();
+            dialogs::pick_folder(&w.state, pick_title, move |p| {
+                r.set_text(&p.to_string_lossy())
+            });
+        });
+        row.add_suffix(&browse);
+        row
     }
 
     // ---- 4. Installing ----

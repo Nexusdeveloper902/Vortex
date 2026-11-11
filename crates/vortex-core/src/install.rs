@@ -44,9 +44,15 @@ pub struct InstallRequest {
     pub installer: HostPath,
     /// Proton dir (`PROTONPATH`).
     pub runtime: HostPath,
-    /// Where the user wants the game. Under `Paths::games_dir()` it is created and owned by
-    /// Vortex; anywhere else it must already exist. Scanned for exes after the install.
+    /// Where the user wants the game (a host folder the user points the installer at; scanned for
+    /// exes after the install). Under `Paths::games_dir()` it is created and owned by Vortex;
+    /// anywhere else an existing folder is used as is and a missing one is created
+    /// ([`crate::paths::new_dir_location`]) but never deleted by Vortex.
     pub install_dir: Option<HostPath>,
+    /// Custom prefix location ([`crate::paths::check_prefix_location`]). `None`: the managed
+    /// `data/prefixes/<env id>`. A custom prefix is created by Vortex but recorded
+    /// `prefix_managed = 0`, so it is never deleted by Vortex.
+    pub prefix: Option<HostPath>,
 }
 
 /// A possible game exe found after the installer finished. The user always confirms or browses.
@@ -238,20 +244,26 @@ impl Installs {
                 ))
             })?;
         let runtime = crate::runtime::validate(req.runtime.as_path())?.path;
+        let prefix = req
+            .prefix
+            .as_ref()
+            .map(|p| {
+                let known = self.known_prefixes(&lock(&self.ctx.db))?;
+                crate::paths::check_prefix_location(p, &self.ctx.paths, &known)
+            })
+            .transpose()?;
         let (install_dir, managed_dir) = match &req.install_dir {
             None => (None, false),
             Some(d) => {
                 let managed = d.as_path().starts_with(self.ctx.paths.games_dir())
                     && d.as_path() != self.ctx.paths.games_dir();
-                if managed {
-                    std::fs::create_dir_all(d).map_err(Error::io(d.as_path()))?;
-                } else if !d.as_path().is_dir() {
-                    return Err(Error::NotFound(format!(
-                        "install folder {}",
-                        d.as_path().display()
-                    )));
-                }
-                (Some(str_of(d)), managed)
+                let d = if managed || d.as_path().is_dir() {
+                    d.clone()
+                } else {
+                    crate::paths::new_dir_location(d)?
+                };
+                std::fs::create_dir_all(&d).map_err(Error::io(d.as_path()))?;
+                (Some(str_of(&d)), managed)
             }
         };
         let kind = match analysis.kind {
@@ -267,7 +279,8 @@ impl Installs {
             source_kind: kind,
             installer_path: str_of(&installer),
         };
-        let (env_id, game_id, install_id) = self.create_managed(&game, Some(&install), &runtime)?;
+        let (env_id, game_id, install_id) =
+            self.create_env(&game, Some(&install), &runtime, prefix)?;
         let install_id = install_id.ok_or_else(|| Error::NotFound("install row".into()))?;
         let events = self.spawn(install_id, false);
         Ok(Started {
@@ -405,7 +418,7 @@ impl Installs {
         let (env_id, game_id) = match &req.env {
             RegisterEnv::New { runtime } => {
                 let rt = crate::runtime::validate(runtime.as_path())?.path;
-                let (e, g, _) = self.create_managed(&game, None, &rt)?;
+                let (e, g, _) = self.create_env(&game, None, &rt, None)?;
                 (e, g)
             }
             RegisterEnv::Existing(id) => {
@@ -417,11 +430,7 @@ impl Installs {
             RegisterEnv::Adopt { prefix, runtime } => {
                 let rt = crate::runtime::validate(runtime.as_path())?.path;
                 let mut db = lock(&self.ctx.db);
-                let known: Vec<PrefixDir> = db
-                    .list_environments()?
-                    .iter()
-                    .filter_map(|e| PrefixDir::new(&e.prefix_path, self.ctx.paths.home(), &[]).ok())
-                    .collect();
+                let known = self.known_prefixes(&db)?;
                 if known.iter().any(|k| k.as_path() == prefix.as_path()) {
                     return Err(Error::Validation(format!(
                         "{} is already a Vortex environment; share it instead",
@@ -519,25 +528,47 @@ impl Installs {
             .ok_or_else(|| Error::NotFound(format!("detached run of install {install_id}")))
     }
 
-    /// Rows for a new managed environment, then its prefix dir. A leftover non-empty dir at the
-    /// new prefix path (ids are reused after deletion) is refused and the new rows are removed.
-    fn create_managed(
+    fn known_prefixes(&self, db: &Db) -> Result<Vec<PrefixDir>> {
+        Ok(db
+            .list_environments()?
+            .iter()
+            .filter_map(|e| PrefixDir::new(&e.prefix_path, self.ctx.paths.home(), &[]).ok())
+            .collect())
+    }
+
+    /// Rows for a new environment, then its prefix dir: the managed `data/prefixes/<id>`, or
+    /// `custom` (checked by `check_prefix_location`, recorded `prefix_managed = 0`). A leftover
+    /// non-empty dir at the new prefix path (ids are reused after deletion; a custom folder filled
+    /// since the check) is refused and the new rows are removed.
+    fn create_env(
         &self,
         game: &NewGame,
         install: Option<&NewInstall>,
         runtime: &HostPath,
+        custom: Option<PrefixDir>,
     ) -> Result<(EnvId, i64, Option<i64>)> {
         let mut db = lock(&self.ctx.db);
         let prefixes = self.ctx.paths.prefixes_dir();
-        let ids = db.create_game(
-            NewEnv::Managed {
-                prefixes_dir: &prefixes,
-                runtime: &str_of(runtime),
+        let (rt, custom_str) = (
+            str_of(runtime),
+            custom.as_ref().map(|p| str_of(p.as_host())),
+        );
+        let env = match &custom_str {
+            Some(prefix) => NewEnv::Unmanaged {
+                prefix,
+                runtime: &rt,
             },
-            game,
-            install,
-        )?;
-        let made = self.ctx.paths.managed_prefix(ids.0).and_then(|prefix| {
+            None => NewEnv::Managed {
+                prefixes_dir: &prefixes,
+                runtime: &rt,
+            },
+        };
+        let ids = db.create_game(env, game, install)?;
+        let prefix = match custom {
+            Some(p) => Ok(p),
+            None => self.ctx.paths.managed_prefix(ids.0),
+        };
+        let made = prefix.and_then(|prefix| {
             let leftover =
                 std::fs::read_dir(prefix.as_path()).is_ok_and(|mut d| d.next().is_some());
             if leftover {

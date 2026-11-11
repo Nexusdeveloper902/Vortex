@@ -174,6 +174,7 @@ impl T {
             installer: source.join(installer).unwrap(),
             runtime: self.runtime.clone(),
             install_dir: None,
+            prefix: None,
         }
     }
 
@@ -636,8 +637,20 @@ fn begin_validates_before_writing_anything() {
     r.runtime = src.clone();
     bad.push(r);
     let mut r = t.req("X", &src, "setup.exe");
-    r.install_dir = Some(HostPath::new(t.root.join("no such dir")).unwrap());
+    r.install_dir = Some(HostPath::new(t.root.join("missing/no such dir")).unwrap());
     bad.push(r);
+    let full = t.root.join("full");
+    std::fs::create_dir_all(full.join("x")).unwrap();
+    for p in [
+        full.clone(),
+        t.root.join("missing/pfx"),
+        t.paths.data_dir().join("mine"),
+        t.paths.home().to_path_buf(),
+    ] {
+        let mut r = t.req("X", &src, "setup.exe");
+        r.prefix = Some(HostPath::new(&p).unwrap());
+        bad.push(r);
+    }
     for req in bad {
         assert!(t.inst.begin(req.clone()).is_err(), "{req:?}");
     }
@@ -658,6 +671,59 @@ fn begin_validates_before_writing_anything() {
         Path::new(&env.prefix_path),
         t.paths.managed_prefix(s.env_id).unwrap().as_path()
     );
+}
+
+#[test]
+fn custom_prefix_location_and_new_install_dir() {
+    let Some(t) = fake() else { return };
+    let src = t.source("custom src", "exit:0");
+    let root = std::fs::canonicalize(&t.root).unwrap();
+    std::fs::create_dir_all(root.join("My Prefixes")).unwrap();
+    std::fs::create_dir_all(root.join("Games")).unwrap();
+    let pfx = root.join("My Prefixes/Foo");
+    let dir = root.join("Games/Foo");
+    let mut r = t.req("Foo", &src, "setup.exe");
+    r.prefix = Some(HostPath::new(&pfx).unwrap());
+    r.install_dir = Some(HostPath::new(&dir).unwrap());
+    let s = t.inst.begin(r).unwrap();
+    let evs = drive(&s.events, LIMIT, |_| {});
+    assert_eq!(
+        states(&evs).last(),
+        Some(&InstallState::SelectExe),
+        "{evs:?}"
+    );
+    let env = t.db().get_environment(s.env_id).unwrap();
+    assert_eq!(Path::new(&env.prefix_path), pfx);
+    assert!(
+        !env.prefix_managed,
+        "custom location is never Vortex's to delete"
+    );
+    assert!(pfx.is_dir() && !t.paths.managed_prefix(s.env_id).unwrap().as_path().exists());
+    let g = t.db().get_game(s.game_id).unwrap();
+    assert_eq!(g.install_dir.as_deref().map(Path::new), Some(dir.as_path()));
+    assert!(!g.install_dir_managed && dir.is_dir());
+
+    // inside (or equal to) a known prefix: refused, nothing written
+    let n = t.db().list_games().unwrap().len();
+    for p in [pfx.join("drive_c/x"), pfx.clone()] {
+        let mut r = t.req("Bar", &src, "setup.exe");
+        r.prefix = Some(HostPath::new(&p).unwrap());
+        assert!(t.inst.begin(r).is_err(), "{p:?}");
+    }
+    assert_eq!(t.db().list_games().unwrap().len(), n);
+
+    // deletion: nothing planned, both folders shown as manual, both survive
+    std::fs::write(pfx.join("system.reg"), "x").unwrap();
+    let plan = vortex_core::delete::plan_game_removal(&t.db(), &t.paths, s.game_id).unwrap();
+    assert!(plan.remove_env && plan.items.is_empty(), "{plan:?}");
+    let manual: Vec<_> = plan.manual.iter().map(|m| m.as_path()).collect();
+    assert!(
+        manual.contains(&pfx.as_path()) && manual.contains(&dir.as_path()),
+        "{plan:?}"
+    );
+    vortex_core::delete::execute(&t.db(), &t.paths, &plan).unwrap();
+    assert!(pfx.join("system.reg").is_file() && dir.is_dir());
+    assert!(t.db().list_environments().unwrap().is_empty());
 }
 
 #[test]
@@ -1025,6 +1091,7 @@ fn it_multi_file_installer_full_state_machine() {
             installer: analysis.candidates[0].path.clone(),
             runtime: HostPath::new(&proton).unwrap(),
             install_dir: None,
+            prefix: None,
         })
         .unwrap();
     let pfx = paths.managed_prefix(s.env_id).unwrap();

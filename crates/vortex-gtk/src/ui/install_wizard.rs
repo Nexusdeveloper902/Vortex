@@ -407,6 +407,11 @@ impl Wizard {
         list.append(&combo);
         list.append(&loc);
         list.append(&advanced);
+        let skip = adw::SwitchRow::builder()
+            .title("Don't look up artwork for this game")
+            .subtitle("Its name is never sent to Steam (NDA titles)")
+            .build();
+        list.append(&skip);
         col.append(&list);
         col.append(&gtk4::Label::builder().label("Install folder: choose this folder in the installer (drive Z: shows your Linux folders); Vortex creates it if needed and looks there for the game. Leave it empty to use the installer's default location inside the prefix.\nPrefix location: an empty or new folder. Leave it empty to use Vortex's own prefixes folder. Vortex never deletes a prefix at a custom location.").css_classes(["dim-label", "caption"]).wrap(true).xalign(0.0).build());
         let go = pill("Install", true);
@@ -444,10 +449,19 @@ impl Wizard {
                 Err(e) => return w.state.toast(&e.to_string()),
             };
             b.set_sensitive(false);
-            let (w, b) = (w.clone(), b.clone());
+            let (w, b, skip) = (w.clone(), b.clone(), skip.is_active());
             glib::spawn_future_local(async move {
                 let installs = w.state.installs.clone();
-                let res = blocking(move || installs.begin(req)).await;
+                let db = w.state.db.clone();
+                let res = blocking(move || {
+                    let s = installs.begin(req)?;
+                    if skip {
+                        // Right at creation; installing games are not looked up meanwhile.
+                        artwork::opt_out_install(&db, s.install_id)?;
+                    }
+                    Ok::<_, vortex_core::error::Error>(s)
+                })
+                .await;
                 b.set_sensitive(true);
                 match res {
                     Some(Ok(s)) => {
@@ -636,13 +650,6 @@ impl Wizard {
             });
         }
         col.append(&browse);
-        let skip = adw::SwitchRow::builder()
-            .title("Don't look up artwork for this game")
-            .subtitle("Its name is never sent to Steam (NDA titles)")
-            .build();
-        let skip_list = boxed();
-        skip_list.append(&skip);
-        col.append(&skip_list);
         col.append(&confirm);
         let failed = gtk4::Button::builder()
             .label("The installer failed")
@@ -667,17 +674,10 @@ impl Wizard {
                     return;
                 };
                 b.set_sensitive(false);
-                let (b, skip) = (b.clone(), skip.is_active());
+                let b = b.clone();
                 glib::spawn_future_local(async move {
                     let (installs, id) = (w.state.installs.clone(), w.install_id.get());
-                    let db = w.state.db.clone();
-                    let res = blocking(move || {
-                        if skip {
-                            artwork::opt_out_install(&db, id)?; // before the game can be looked up
-                        }
-                        installs.confirm_exe(id, &exe, None)
-                    })
-                    .await;
+                    let res = blocking(move || installs.confirm_exe(id, &exe, None)).await;
                     b.set_sensitive(true);
                     match res {
                         Some(Ok(reg)) => {

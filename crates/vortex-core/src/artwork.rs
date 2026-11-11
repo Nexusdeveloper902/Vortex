@@ -531,8 +531,8 @@ pub fn fetch(
             return Ok(None);
         }
         let g = db.get_game(game_id)?;
-        if !force && g.status == GameStatus::Installing {
-            return Ok(None); // the add-time opt-out may still be coming
+        if !force && g.status != GameStatus::Installed {
+            return Ok(None); // fail closed: only installed games, never a failed/NDA install
         }
         g.name
     };

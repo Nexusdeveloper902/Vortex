@@ -65,10 +65,11 @@ fn search(json: &'static str) -> Route {
 
 const PORTAL: &str = r#"{"total":2,"items":[{"type":"app","name":"Portal 2","id":620},{"type":"app","name":"Portal 2 Soundtrack","id":9}]}"#;
 
-/// Not `installing`: those are skipped by background lookups until confirmed.
+/// `installed`: the only status background lookups consider.
 fn game(name: &str, env: i64) -> NewGame {
     let mut g = NewGame::new(name, env);
-    g.status = GameStatus::Failed;
+    g.status = GameStatus::Installed;
+    g.exe_path = Some("/g/game.exe".into());
     g
 }
 
@@ -512,4 +513,35 @@ fn real_steam_dark_souls_3_dev_build() {
         .expect("confident match");
     assert_eq!(img.steam_app, 374320);
     assert!(artwork::is_image(&img.bytes));
+}
+
+#[test]
+fn failed_and_cancelled_installs_are_never_looked_up() {
+    let s = serve(|_| Some(search(DS3)));
+    let (_t, paths, db, _id) = setup("Installed One");
+    let mut ids = vec![];
+    for (name, st, optout) in [
+        ("Failed NDA", GameStatus::Failed, true),
+        ("Interrupted NDA", GameStatus::Interrupted, true),
+        ("Failed plain", GameStatus::Failed, false),
+        ("Installing plain", GameStatus::Installing, false),
+    ] {
+        let d = db.lock().unwrap();
+        let mut g = NewGame::new(name, 1);
+        g.status = st;
+        let id = d.insert_game(&g).unwrap();
+        if optout {
+            artwork::opt_out(&d, id).unwrap();
+        }
+        ids.push(id);
+    }
+    // only the installed game is eligible
+    assert_eq!(db.lock().unwrap().games_without_artwork().unwrap().len(), 1);
+    for id in ids {
+        assert_eq!(
+            artwork::fetch(&db, &paths, &s.src, id, false).unwrap(),
+            None
+        );
+    }
+    assert_eq!(s.hits.load(Ordering::SeqCst), 0);
 }

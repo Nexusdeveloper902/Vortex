@@ -44,10 +44,10 @@ is sent to Steam only when you press Enter or Apply. Pick a result, or paste a s
 (`store.steampowered.com/app/<id>/...`) or a bare app id, to download that app's cover. It works
 even when automatic download is off, but not in offline mode.
 
-Titles under NDA: switch on **Don't look up artwork for this game** when confirming the executable
-in the install wizard, and the name is never sent. The game page menu has the same choice
-(**Don't look up artwork for this game** / **Allow automatic artwork lookup**). Games still being
-installed are never looked up in the background.
+Titles under NDA: switch on **Don't look up artwork for this game**
+on the install wizard's first step (name and location), and the name is never sent. The game page menu has the same choice
+(**Don't look up artwork for this game** / **Allow automatic artwork lookup**). Only fully installed games
+are looked up in the background.
 
 ## Install a game
 

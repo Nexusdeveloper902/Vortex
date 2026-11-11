@@ -1013,12 +1013,12 @@ impl Db {
         Ok(())
     }
 
-    /// Ids of games whose artwork was never looked up. Games still `installing` are left out, so
-    /// the wizard can record an opt-out before the first lookup can happen (M22).
+    /// Ids of games whose artwork was never looked up. Only `installed` games: a failed or
+    /// cancelled install never sends its (possibly NDA) name; fail closed (M22).
     pub fn games_without_artwork(&self) -> Result<Vec<i64>> {
         collect(
             &self.conn,
-            "SELECT id FROM games WHERE status<>'installing'
+            "SELECT id FROM games WHERE status='installed'
              AND id NOT IN (SELECT game_id FROM artwork) ORDER BY id",
             [],
             |r| r.get(0),

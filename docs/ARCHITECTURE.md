@@ -566,9 +566,10 @@ prefix to an older Proton is refused without explicit confirmation (prefix `vers
   app's art and records `auto` with `steam_app` = the choice. Allowed when `artwork_auto = "0"`,
   refused in offline mode. No thumbnails: the search JSON's image URLs are not fetched.
 - Opt-out (NDA): an `artwork` row `none` written before any lookup (`opt_out`, `opt_out_install`;
-  menu toggle `allow_auto` deletes the row). Ordering: games still `installing` are excluded from
-  `games_without_artwork` and from non-forced `fetch`, so the wizard's opt-out (written before
-  `confirm_exe`) always precedes the first possible background query.
+  menu toggle `allow_auto` deletes the row). The wizard switch is on the first step and persisted
+  right after `begin` creates the game. Fail closed: only `installed` games are looked up
+  (`games_without_artwork`, non-forced `fetch`), so failed, cancelled, interrupted and installing
+  games never send their name, whichever wizard button ends the flow.
 - Checks: 20 s timeout, redirects refused, Content-Type `image/jpeg|png` and JPEG/PNG magic bytes,
   5 MB cap (1 MB for the search JSON, 20 MB for a user-picked file). Written as `.tmp-<id>` then renamed.
 - State: no `artwork` row = never looked up; the GTK library starts one background pass per game per

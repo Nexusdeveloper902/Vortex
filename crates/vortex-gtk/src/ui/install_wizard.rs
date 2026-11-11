@@ -652,7 +652,7 @@ impl Wizard {
         col.append(&browse);
         col.append(&confirm);
         let failed = gtk4::Button::builder()
-            .label("The installer failed")
+            .label("Mark the install as failed")
             .css_classes(["flat"])
             .halign(gtk4::Align::Center)
             .build();

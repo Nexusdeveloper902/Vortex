@@ -6,10 +6,14 @@ runs Windows games through Proton, using [UMU Launcher](https://github.com/Open-
 
 Vortex is not affiliated with Valve, Lutris or Bottles.
 
-> **Status: beta.** The install-to-launch workflow is implemented: runtime discovery, installers
-> (files and folders, nested prerequisites), executable registration, the library, per-game
-> configuration, winetricks, backup and restore, and logs. Verification on a real machine is tracked in
-> [`docs/E2E-REPORT.md`](docs/E2E-REPORT.md), which marks each check as PASS, FAIL or NOT RUN.
+> **Status: 1.0.** The install-to-launch workflow is complete: runtime discovery, installers
+> (files and folders, nested prerequisites), executable registration, the library with automatic
+> artwork, per-game configuration, winetricks, backup and restore, and logs. Verification on a real
+> machine is tracked in [`docs/E2E-REPORT.md`](docs/E2E-REPORT.md), which marks each check as PASS,
+> FAIL or NOT RUN.
+>
+> **Tested hardware:** only Arch Linux on Hyprland (Wayland) with an AMD GPU. GNOME, KDE, X11 and
+> NVIDIA/Intel GPUs are untested; reports are welcome (see the bug report template).
 
 ## Documentation
 

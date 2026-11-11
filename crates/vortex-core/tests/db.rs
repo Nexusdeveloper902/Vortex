@@ -37,10 +37,10 @@ fn new_run(env: i64, game: i64, inst: i64, marker: &str) -> NewRun {
 }
 
 #[test]
-fn fresh_db_is_v1_with_fk_and_wal() {
+fn fresh_db_is_current_with_fk_and_wal() {
     let tmp = tempfile::tempdir().unwrap();
     let (_, db) = open(&tmp);
-    assert_eq!(db.user_version().unwrap(), 1);
+    assert_eq!(db.user_version().unwrap(), 2);
     // FK enforced: game with unknown environment is rejected.
     assert!(db.insert_game(&NewGame::new("x", 99)).is_err());
 }

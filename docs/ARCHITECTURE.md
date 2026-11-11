@@ -36,6 +36,7 @@ crates/vortex-core/
   src/paths.rs                   XDG dirs, managed roots, path kinds (HostPath, PrefixDir, WinPath)
   src/db.rs                      Db, schema, migrations, recovery queries
   src/migrations/0001_init.sql
+  src/migrations/0002_artwork.sql
   src/runtime.rs                 Proton discovery + validation
   src/runtime_ge.rs              GE-Proton release lookup, download, verify, extract
   src/runner.rs                  Invocation -> umu-run Command (pure, no spawning)
@@ -49,6 +50,7 @@ crates/vortex-core/
   src/logs.rs                    log files, redaction
   src/diagnose.rs                failure classification from exit status + log lines
   src/desktop.rs                 XDG .desktop entries per game
+  src/artwork.rs                 cover art: Steam store search + CDN lookup, custom image, cache
   tests/fake-umu-run             POSIX sh fake of umu-run (see section 13)
   tests/*.rs                     integration tests (fake umu by default, real umu with --ignored)
   tests/fixtures/installers/     .bat installers, C sources for mingw-built test installers
@@ -91,6 +93,7 @@ must not list them (CI checks this). All decisions, validation and filesystem ef
 | `logs` | per-run log file, redaction | `LogWriter::create(&Paths, run)`, `redact(&str) -> Cow<str>` |
 | `diagnose` | classifying failures | `classify(kind, exit, &[String], &Preflight) -> Vec<Finding>` |
 | `desktop` | per-game .desktop files | `write_entry(&Paths, &Game, exe: &Path)`, `remove_entry(..)` |
+| `artwork` | cover images (optional, section 15) | `fetch(&Mutex<Db>, &Paths, &Sources, game_id, force)`, `spawn_auto(..) -> Receiver<Updated>`, `set_custom(..)`, `remove(..)`, `path(..)` |
 
 No traits except where a test fake is impossible otherwise. umu-run is faked by a configurable binary
 path (`Tools { umu_run: PathBuf }`), Proton's wineserver by a fake runtime dir in tests, HTTP by a
@@ -383,12 +386,25 @@ CREATE TABLE backups (                           -- survive environment deletion
 );
 ```
 
+Schema v2 (`0002_artwork.sql`, M17):
+
+```sql
+CREATE TABLE artwork (                           -- no row = never looked up
+  game_id    INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+  source     TEXT NOT NULL CHECK (source IN ('auto','custom','none')),  -- none = no match / removed
+  kind       TEXT CHECK (kind IN ('portrait','landscape')),
+  steam_app  INTEGER,                            -- matched Steam app id (auto only)
+  updated_at INTEGER NOT NULL
+);
+```
+
 "Last launch information" = latest `runs` row with `kind='launch'` for the game; no extra column.
 Runtimes are not stored: they are discovered on each start; a game's `runtime_path` that no longer
 validates surfaces as `RuntimeMissing` with a picker.
 
 Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `data/runtimes/<GE tag>/`,
 `data/runtimes/.tmp-*`, `data/backups/<env_id>-<ts>.tar.gz`, `data/logs/<game_id|env_id>/<run_id>-<kind>.log`,
+`data/artwork/<game_id>.img` (JPEG or PNG, content-sniffed),
 `~/.local/share/applications/io.github.nexusdeveloper902.Vortex.game-<id>.desktop`.
 
 ## 10. Logs, redaction, diagnostics
@@ -433,6 +449,8 @@ Filesystem (all under `Paths`): `data/vortex.db`, `data/prefixes/<env_id>/`, `da
 7. Downloads: HTTPS to `api.github.com` / `github.com` / `objects.githubusercontent.com` only;
    sha512 must match the release `.sha512sum` before extraction; extract to `.tmp-*`, require a single
    top-level dir, then atomic rename. Partial downloads never look like valid runtimes.
+   Artwork (section 15) is the only other network use: Steam's public store search JSON and CDN
+   images, no API key, no redirects followed, never when turned off or in offline mode.
 8. No secrets in logs (section 10). Vortex never writes to `~/.wine`, the user's Steam dirs, or any
    prefix it did not create, except when the user explicitly points an environment at it
    (`prefix_managed=0`; never deleted by Vortex).
@@ -500,3 +518,26 @@ The program's own console output does not reach umu-run's pipes.
 Other known limits: host `/tmp` sharing is required for the host-side wineserver calls (native build
 only, no Flatpak); first use needs network for the SLR (~700 MB) and GE-Proton (~567 MB); switching a
 prefix to an older Proton is refused without explicit confirmation (prefix `version` cannot downgrade).
+
+## 15. Artwork (M17, spec 7: optional, offline keeps working)
+
+- Source: Steam's public store, no API key, no HTML scraping. `GET
+  store.steampowered.com/api/storesearch/?term=<name>&l=english&cc=US` (JSON `items[].id/name`), then
+  `shared.steamstatic.com/store_item_assets/steam/apps/<appid>/` `library_600x900_2x.jpg`, then
+  `library_600x900.jpg` (portrait), then `header.jpg` (landscape). The game's name is the only data sent.
+- Matching (`artwork::best_match`): names normalized (lowercase, no ™®© or apostrophes, punctuation
+  to spaces, leading "the" dropped). Any exact match wins; otherwise only the first result, and only
+  when its title before a `:`/` - ` subtitle matches. Anything else is no match: the placeholder is
+  better than the wrong cover.
+- Checks: 20 s timeout, redirects refused, Content-Type `image/jpeg|png` and JPEG/PNG magic bytes,
+  5 MB cap (1 MB for the search JSON, 20 MB for a user-picked file). Written as `.tmp-<id>` then renamed.
+- State: no `artwork` row = never looked up; the GTK library starts one background pass per game per
+  session (`spawn_auto`, std thread, `Updated { game_id, path }` events). No match records `none` so it
+  is not queried again; network errors record nothing (retried next session) and only go to stderr.
+  `force` (Refresh artwork) replaces the image on a match and keeps it otherwise. A background pass
+  never overwrites a row written meanwhile (custom image, removal).
+- Off switch: setting `artwork_auto = "0"` or `offline_mode = "1"` means zero requests.
+- Deletion: "Remove artwork" deletes only `data/artwork/<id>.img` and records `none`. Removing a game
+  deletes its cover after the `DeletionPlan` (like the desktop entry): a single file at a fixed path
+  derived from the game id, so no plan item is needed. User-picked source files are never touched.
+

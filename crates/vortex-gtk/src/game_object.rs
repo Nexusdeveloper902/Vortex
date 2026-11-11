@@ -3,6 +3,7 @@
 use gtk4::glib;
 use gtk4::glib::prelude::*;
 use gtk4::subclass::prelude::*;
+use std::path::{Path, PathBuf};
 use vortex_core::db::Game;
 
 mod imp {
@@ -25,6 +26,9 @@ mod imp {
         /// Display name of the game's Proton runtime (folder name).
         #[property(get, set)]
         runtime: RefCell<String>,
+        /// Cached cover image path, empty when none.
+        #[property(get, set)]
+        art: RefCell<String>,
     }
 
     #[glib::object_subclass]
@@ -42,14 +46,25 @@ glib::wrapper! {
 }
 
 impl GameObject {
-    pub fn new(g: &Game, last_played: Option<i64>, runtime: &str) -> Self {
+    pub fn new(g: &Game, last_played: Option<i64>, runtime: &str, art: Option<&Path>) -> Self {
         glib::Object::builder()
             .property("id", g.id)
             .property("name", &g.name)
             .property("status", g.status.as_str())
             .property("last-played", last_played.unwrap_or(0))
             .property("runtime", runtime)
+            .property(
+                "art",
+                art.map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            )
             .build()
+    }
+
+    pub fn art_path(&self) -> Option<PathBuf> {
+        Some(self.art())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
     }
 }
 

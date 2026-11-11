@@ -279,16 +279,21 @@ pub fn stop_detached(installs: &Installs, runs: &Runs, r: &Run) -> Result<usize>
 }
 
 /// Banner for runs (any kind) whose processes survived a previous session: offers Stop or Wait,
-/// and polls every one of them until it ends.
-pub fn detached_banner(state: &Rc<AppState>) -> adw::Banner {
+/// and polls every one of them until it ends. `on_change` runs whenever the number of detached
+/// runs changes (their games' status changed, e.g. installing -> interrupted).
+pub fn detached_banner(state: &Rc<AppState>, on_change: impl Fn() + 'static) -> adw::Banner {
     let banner = adw::Banner::builder()
         .button_label("Stop or wait...")
         .revealed(false)
         .build();
     let refresh = {
         let (state, banner) = (state.clone(), banner.clone());
+        let last = std::cell::Cell::new(None);
         Rc::new(move || {
             let n = state.runs.detached().map(|v| v.len()).unwrap_or(0);
+            if last.replace(Some(n)).is_some_and(|prev| prev != n) {
+                on_change();
+            }
             banner.set_title(&format!(
                 "{n} program(s) from an earlier session are still running"
             ));

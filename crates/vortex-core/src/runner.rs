@@ -69,7 +69,15 @@ pub struct Invocation {
     pub env: Vec<(String, String)>,
     /// Verbose mode: `UMU_LOG=debug`, `PROTON_LOG=1`, `PROTON_LOG_DIR=<dir>`.
     pub verbose_log_dir: Option<HostPath>,
+    /// Disables Wine's audio drivers for this process tree only ([`MUTE_AUDIO_OVERRIDES`]
+    /// appended to `WINEDLLOVERRIDES`). Set for installer and uninstaller runs, never for
+    /// launches; nothing is written to the prefix, so games keep their sound.
+    pub mute_audio: bool,
 }
+
+/// Wine DLL overrides that disable every Wine audio driver: Windows programs then see no audio
+/// device (ARCHITECTURE section 5).
+pub const MUTE_AUDIO_OVERRIDES: &str = "winepulse.drv,winealsa.drv,wineoss.drv=d";
 
 /// Names the user may not set: Vortex owns them.
 fn is_reserved(name: &str) -> bool {
@@ -189,7 +197,8 @@ impl Invocation {
             })
     }
 
-    /// Builds the Command. Pure except for reading `HOME`; the root refusal is in
+    /// Builds the Command. Pure except for reading `HOME` (and an inherited `WINEDLLOVERRIDES`
+    /// when `mute_audio` is set); the root refusal is in
     /// [`Invocation::preflight`], which `process::Runs::start` always runs before spawning.
     pub fn command(&self, tools: &Tools, marker: &str) -> Result<Command> {
         validate_env(&self.env)?;
@@ -210,6 +219,23 @@ impl Invocation {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if self.mute_audio {
+            // Merge: the run's own value, else the inherited one, then ours last so it wins.
+            // Proton appends its own overrides after this value (`append_to_env_str`).
+            let mut v: std::ffi::OsString = self
+                .env
+                .iter()
+                .rev()
+                .find(|(k, _)| k == "WINEDLLOVERRIDES")
+                .map(|(_, v)| v.into())
+                .or_else(|| std::env::var_os("WINEDLLOVERRIDES"))
+                .unwrap_or_default();
+            if !v.is_empty() {
+                v.push(";");
+            }
+            v.push(MUTE_AUDIO_OVERRIDES);
+            c.env("WINEDLLOVERRIDES", v);
+        }
         // Keeps terminal Ctrl-C away from umu-run; not used for stop (ARCHITECTURE 6.1).
         std::os::unix::process::CommandExt::process_group(&mut c, 0);
 
@@ -264,6 +290,7 @@ mod tests {
                 ("GAMEID".into(), "umu-1".into()),
             ],
             verbose_log_dir: None,
+            mute_audio: false,
         }
     }
 
@@ -347,6 +374,27 @@ mod tests {
         let mut i = inv(Program::Winetricks, "/tmp");
         i.env.push(("STEAM_COMPAT_DATA_PATH".into(), "/x".into()));
         assert!(i.command(&Tools::default(), "m").is_err());
+    }
+
+    #[test]
+    fn mute_audio_merges_overrides_and_is_off_by_default() {
+        let exe = || Program::Exe(HostPath::new("/mnt/g/setup.exe").unwrap());
+        let c = inv(exe(), "/mnt/g")
+            .command(&Tools::default(), "m")
+            .unwrap();
+        assert!(env_of(&c, "WINEDLLOVERRIDES").is_none());
+        let mut i = inv(exe(), "/mnt/g");
+        i.mute_audio = true;
+        let c = i.command(&Tools::default(), "m").unwrap();
+        // The test process may inherit a value; ours always comes last.
+        let v = env_of(&c, "WINEDLLOVERRIDES").unwrap().to_string_lossy();
+        assert!(v.ends_with(MUTE_AUDIO_OVERRIDES), "{v}");
+        i.env.push(("WINEDLLOVERRIDES".into(), "d3d9=n,b".into()));
+        let c = i.command(&Tools::default(), "m").unwrap();
+        assert_eq!(
+            env_of(&c, "WINEDLLOVERRIDES").unwrap(),
+            "d3d9=n,b;winepulse.drv,winealsa.drv,wineoss.drv=d"
+        );
     }
 
     #[test]

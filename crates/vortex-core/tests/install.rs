@@ -16,7 +16,7 @@ use vortex_core::install::{
 };
 use vortex_core::paths::{HostPath, Paths, PrefixDir};
 use vortex_core::process::{Outcome, Phase, RunEvent, Runs, Timing, scan_marker};
-use vortex_core::runner::Tools;
+use vortex_core::runner::{MUTE_AUDIO_OVERRIDES, Tools};
 
 const MANIFEST: &str = env!("CARGO_MANIFEST_DIR");
 const CHILD_ROOT: &str = "VORTEX_M9_CHILD_ROOT";
@@ -321,6 +321,12 @@ fn happy_path_select_exe_then_confirm() {
     assert_eq!(rec, format!("cwd={dir}\narg={dir}/setup.exe\n"));
     let envs = std::fs::read_to_string(src.as_path().join(".fake-rec.env")).unwrap();
     assert!(envs.contains(&format!("WINEPREFIX={}\n", pfx.as_path().display())));
+    // Installers run muted (the audio drivers are disabled for that run only).
+    let overrides = envs
+        .lines()
+        .find_map(|l| l.strip_prefix("WINEDLLOVERRIDES="))
+        .unwrap_or_default();
+    assert!(overrides.ends_with(MUTE_AUDIO_OVERRIDES), "{overrides:?}");
 
     // confirm_exe rejects a missing exe and non-programs; state stays SelectExe.
     let missing = HostPath::new(game_dir.join("Nope.exe")).unwrap();

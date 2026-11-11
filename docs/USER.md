@@ -32,6 +32,8 @@ Run EXE/MSI, Dependencies, Logs, Back up, Restore and an overflow menu.
    exist. If you leave it empty, the installer uses its default location inside the game's prefix.
 4. Vortex creates the Wine prefix and runs the installer. The installer's folder is its working
    directory, and the installer reads its files in place. Vortex never modifies your source files.
+   Installers always run with sound off (there is no option to turn it on). Only the installer and
+   the programs it starts are muted; the game keeps its sound.
 5. Vortex then shows **Waiting for background processes** until the installer and any prerequisite it
    started have exited. Nested prerequisites (for example a `setup.exe` that starts a redistributable
    and exits) are waited for this way.
@@ -142,6 +144,7 @@ Vortex has two different removal actions. The overflow menu on the game page hol
 - **Run the game's uninstaller** runs an `unins*.exe` that Vortex found in the install folder (or in
   the prefix's `Program Files`, `Program Files (x86)`, `GOG Games` and `Games` folders). It is available
   for installed games. The game's own uninstaller decides what it removes. Vortex does not track it.
+  Like installers, the uninstaller runs with sound off.
 - **Remove completely** removes the game from the library and deletes Vortex's files for it. Vortex
   first shows the exact plan:
   - Install folders that Vortex created, under its own `games` folder, with their sizes.

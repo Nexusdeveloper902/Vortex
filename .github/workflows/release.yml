@@ -75,7 +75,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: tarball
-          path: vortex-*.tar.gz
+          path: vortex-launcher-*.tar.gz
 
   deb:
     needs: tag
@@ -101,7 +101,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: deb
-          path: vortex_*.deb
+          path: vortex-launcher_*.deb
 
   rpm:
     needs: tag
@@ -122,7 +122,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: rpm
-          path: vortex-*.rpm
+          path: vortex-launcher-*.rpm
 
   publish:
     needs: [tag, tarball, deb, rpm]
@@ -138,7 +138,7 @@ jobs:
           merge-multiple: true
       - name: Checksums
         working-directory: dist
-        run: sha256sum vortex* > sha256sums.txt && cat sha256sums.txt
+        run: sha256sum vortex-launcher* > sha256sums.txt && cat sha256sums.txt
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*

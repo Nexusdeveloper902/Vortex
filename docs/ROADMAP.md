@@ -65,7 +65,7 @@ query append it at the end of `db.rs` (append-only keeps merges trivial).
   CI: GitHub Actions in `archlinux:latest` container (fmt, clippy -D warnings, test), plus a job
   asserting `cargo tree -p vortex-core -e normal` contains no `gtk4|glib|gio|libadwaita`.
 - Deps: none.
-- Acceptance: CI green on the PR; `cargo run --bin vortex` shows the window on Wayland (manual
+- Acceptance: CI green on the PR; `cargo run --bin vortex-launcher` shows the window on Wayland (manual
   screenshot or `WAYLAND_DISPLAY` run noted in PR); `cargo test -p vortex-core` runs without GTK libs
   (CI job on plain `rust` image for core only).
 

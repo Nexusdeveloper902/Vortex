@@ -23,11 +23,11 @@ fix this file in the same PR that changes the pipeline.
    release next time), with output `release_created=true`. A draft is invisible to the public.
 5. The same workflow run then builds and publishes:
    - `tarball`: `archlinux:latest` container, `cargo build --release --locked -p vortex-gtk`,
-     `packaging/make-tarball.sh X.Y.Z` → `vortex-X.Y.Z-x86_64-linux.tar.gz`.
+     `packaging/make-tarball.sh X.Y.Z` → `vortex-launcher-X.Y.Z-x86_64-linux.tar.gz`.
    - `deb`: `debian:trixie` container, Rust via rustup (trixie's rustc is older than the MSRV),
-     `cargo deb -p vortex-gtk --locked` → `vortex_X.Y.Z-1_amd64.deb`.
+     `cargo deb -p vortex-gtk --locked` → `vortex-launcher_X.Y.Z-1_amd64.deb`.
    - `rpm`: `fedora:latest` container, `cargo generate-rpm -p crates/vortex-gtk` →
-     `vortex-X.Y.Z-1.x86_64.rpm`.
+     `vortex-launcher-X.Y.Z-1.x86_64.rpm`.
    - `publish`: downloads the three, writes `sha256sums.txt`, creates a build provenance
      attestation (`actions/attest-build-provenance`), runs `gh release upload --clobber`, and
      only then publishes the draft (`gh release edit vX.Y.Z --draft=false`). So a public release
@@ -53,7 +53,9 @@ build jobs hang off `release_created` in the same run and not off a tag push.
 1. The PR has both commits: `chore(main): release X.Y.Z` and `chore: sync Cargo.lock`. If the
    second is missing, the latest `Release` workflow run on `main` failed or has not finished.
 2. `gh pr diff <n>` shows `Cargo.toml`, `Cargo.lock` (exactly the `vortex-core` and `vortex-gtk`
-   `version` lines), `.release-please-manifest.json`, `version.txt`, `CHANGELOG.md`. Nothing else.
+   `version` lines), `.release-please-manifest.json`, `version.txt`, `CHANGELOG.md`. Nothing else. Then push a commit to the release PR branch adding
+   `<release version="X.Y.Z" date="..."/>` to `data/io.github.nexusdeveloper902.Vortex.metainfo.xml`
+   (the one allowed extra file).
 3. The lockfile commit was pushed with `GITHUB_TOKEN`, so CI does not run on it. That is expected;
    the release builds use `--locked` and fail loudly on a mismatch.
 4. Squash-merge it: `gh pr merge <n> --squash --delete-branch`.
@@ -67,7 +69,7 @@ id=$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].d
 gh run watch "$id"
 gh release view vX.Y.Z --json assets --jq '.assets[].name'   # tar.gz, .deb, .rpm, sha256sums.txt
 gh release download vX.Y.Z -D /tmp/vortex-rel && (cd /tmp/vortex-rel && sha256sum -c sha256sums.txt)
-gh attestation verify /tmp/vortex-rel/vortex_*.deb --repo Nexusdeveloper902/Vortex
+gh attestation verify /tmp/vortex-rel/vortex-launcher_*.deb --repo Nexusdeveloper902/Vortex
 ```
 
 Report the run URL and the asset list, and that `gh release view vX.Y.Z --json isDraft` is
@@ -84,14 +86,21 @@ draft or not), then publishes it.
 
 | Asset | Built on | Target | Name / binary |
 |---|---|---|---|
-| tarball | Arch (latest) | recent glibc, GTK ≥ 4.14, libadwaita ≥ 1.6 | `bin/vortex` |
-| .deb | Debian 13 trixie | Debian 13+, Ubuntu 25.04+ | `vortex`, `/usr/bin/vortex` |
-| .rpm | Fedora latest | Fedora | `vortex`, `/usr/bin/vortex` |
+| tarball | Arch (latest) | recent glibc, GTK ≥ 4.14, libadwaita ≥ 1.6 | `bin/vortex-launcher` |
+| .deb | Debian 13 trixie | Debian 13+, Ubuntu 25.04+ | `vortex-launcher`, `/usr/bin/vortex-launcher` |
+| .rpm | Fedora latest | Fedora | `vortex-launcher`, `/usr/bin/vortex-launcher` |
 | PKGBUILD (not published) | user's machine | Arch | `vortex-launcher-git`, `/usr/bin/vortex-launcher` |
 
 - Debian 12 and Ubuntu 24.04 are too old (GTK/libadwaita). Do not lower the deb build image.
-- On the AUR, `vortex` is an unrelated app (Nexus Mods), hence the Arch-only rename. Per-game
-  `.desktop` entries use `current_exe()`, so they follow whichever binary name is installed.
+- One name for every installed artifact: package `vortex-launcher` (Arch: `vortex-launcher-git`),
+  cargo bin target and `/usr/bin/vortex-launcher`, `Exec`/`TryExec=vortex-launcher`, metainfo
+  `<binary>vortex-launcher</binary>`. `vortex` is an unrelated app (Nexus Mods) on the AUR and
+  owns `/usr/bin/vortex`. Only the app id `io.github.nexusdeveloper902.Vortex` and the data dir
+  (`~/.local/share/vortex`) keep the short name. Per-game `.desktop` entries use `current_exe()`.
+- Renaming the binary is user-visible but is committed as `feat`, not `!`: before 1.0 a `!`
+  would make release-please jump to 1.0.0 (`bump-minor-pre-major` is off).
+- The `<releases>` list in `data/*.metainfo.xml` is not updated by release-please: add a
+  `<release version date/>` entry in the release PR (checklist item 2).
 - umu-launcher is not in Debian or Fedora repos: no Depends/Recommends on it; README says to install
   it separately.
 - Package metadata lives in `crates/vortex-gtk/Cargo.toml` (`[package.metadata.deb]`,

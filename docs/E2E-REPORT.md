@@ -363,12 +363,13 @@ installer and uninstaller audio (unit test per run kind, and the audio table abo
 
 ## Observations (not fixed)
 
-- After a cancelled prefix init, the wizard still says "The installer finished: choose the
-  executable" next to Retry.
+- After a cancelled prefix init, the wizard still said "The installer finished: choose the
+  executable" next to Retry. Fixed in [#42](https://github.com/Nexusdeveloper902/Vortex/pull/42).
 - With `HOME` set to an empty directory, Proton's `steam.exe` aborts during wineboot
   (lsteamclient `steamclient_main.c:375 "!status"`). The GUI demo used the real `HOME` and
   isolated XDG dirs.
 - Fixture cosmetic issue: the Welcome page body text is clipped.
-- `tests/launch.rs` leaves two small wrapper scripts in `$TMPDIR` per run (`vortex-m10-wt-PID`,
-  `vortex-m16-rec-PID`), because they live in a static that is never dropped.
+- `tests/launch.rs` left two small wrapper scripts in `$TMPDIR` per run (`vortex-m10-wt-PID`,
+  `vortex-m16-rec-PID`), because they lived in a static that is never dropped. Fixed in
+  [#43](https://github.com/Nexusdeveloper902/Vortex/pull/43).
 - Wine checkboxes ignore a synthetic click that has no hold between press and release.

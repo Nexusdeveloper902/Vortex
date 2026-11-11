@@ -164,6 +164,11 @@ fn activate(app: &adw::Application, slot: &Slot) {
     let runs = Arc::new(Runs::new(paths.clone(), Tools::default(), db.clone()));
     let mut installs = Installs::new(paths.clone(), db.clone(), runs.clone());
     if let Ok(exe) = std::env::current_exe() {
+        let refresh = (paths.clone(), exe.clone());
+        // Off the GTK thread: repoint per-game entries left behind by a renamed or moved binary.
+        std::thread::spawn(move || {
+            let _ = vortex_core::desktop::refresh_entries(&refresh.0, &refresh.1);
+        });
         installs = installs.with_desktop_entries(exe);
     }
     // Before any run starts: marks dead runs/installs interrupted, keeps live ones as detached.

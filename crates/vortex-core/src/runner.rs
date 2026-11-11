@@ -24,6 +24,40 @@ impl Default for Tools {
     }
 }
 
+/// Result of [`Tools::check`]: what is installed. Missing pieces are `None` / empty, not errors.
+#[derive(Debug, Clone)]
+pub struct ToolCheck {
+    /// Resolved absolute `umu-run`; `None` = not found. Required for anything that runs Windows code.
+    pub umu_run: Option<PathBuf>,
+    pub runtimes: Vec<crate::runtime::Runtime>,
+}
+
+/// Resolve `name` without a shell: a name with a `/` is used as is, a bare name is searched in the
+/// `path_var` directories. Only regular files with an execute bit count.
+pub fn which(name: &Path, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let ok = |p: &Path| {
+        p.metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    };
+    if name.components().count() > 1 || name.is_absolute() {
+        return ok(name).then(|| name.to_path_buf());
+    }
+    std::env::split_paths(path_var)
+        .map(|d| d.join(name))
+        .find(|p| ok(p))
+}
+
+impl Tools {
+    /// Probe umu-run (the configured path) and Proton runtimes.
+    pub fn check(&self, path_var: &std::ffi::OsStr, home: &Path, runtimes_dir: &Path) -> ToolCheck {
+        ToolCheck {
+            umu_run: which(&self.umu_run, path_var),
+            runtimes: crate::runtime::discover(home, runtimes_dir),
+        }
+    }
+}
+
 /// Windows built-ins. Always spawned by full `C:\windows\system32\<name>.exe` path: with a bare
 /// name umu-run reports "Executable not found" and always exits 0, losing the real code (M1 F1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

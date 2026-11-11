@@ -79,7 +79,8 @@ impl World {
         std::fs::create_dir_all(&src).unwrap();
         let db = Arc::new(Mutex::new(Db::open(&paths.db_file()).unwrap()));
         let runs = Arc::new(Runs::new(paths.clone(), Tools::default(), db.clone()));
-        let bin = std::env::var("VORTEX_E2E_BIN").unwrap_or_else(|_| "/usr/bin/vortex".into());
+        let bin =
+            std::env::var("VORTEX_E2E_BIN").unwrap_or_else(|_| "/usr/bin/vortex-launcher".into());
         let inst = Installs::new(paths.clone(), db.clone(), runs.clone())
             .with_desktop_entries(PathBuf::from(bin));
         say!("data dir {}", paths.data_dir().display());

@@ -17,7 +17,7 @@ through Proton via UMU Launcher (`umu-run`), one isolated prefix per game. Spec:
 ```sh
 # system deps (Arch): gtk4 libadwaita sqlite umu-launcher winetricks
 cargo build --workspace
-cargo run --bin vortex                         # the app
+cargo run --bin vortex-launcher                         # the app
 cargo test -p vortex-core                      # headless, fake umu-run, no GTK needed
 cargo test --workspace
 VORTEX_IT_PROTON=/abs/path/to/proton cargo test -p vortex-core -- --ignored   # real umu integration

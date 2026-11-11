@@ -10,7 +10,7 @@ pub type EnvId = i64;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("I/O error on {}: {source}", path.display())]
+    #[error("{}", io_msg(path, source))]
     Io {
         path: PathBuf,
         #[source]
@@ -44,4 +44,15 @@ impl Error {
         let path = path.into();
         move |source| Error::Io { path, source }
     }
+}
+
+fn io_msg(path: &std::path::Path, source: &std::io::Error) -> String {
+    if source.kind() == std::io::ErrorKind::NotFound
+        && path.file_name().is_some_and(|n| n == "umu-run")
+    {
+        return "umu-run was not found. Install UMU Launcher (Arch: umu-launcher; other distros: \
+                https://github.com/Open-Wine-Components/umu-launcher/releases), then try again."
+            .into();
+    }
+    format!("I/O error on {}: {source}", path.display())
 }

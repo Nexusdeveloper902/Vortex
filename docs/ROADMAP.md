@@ -66,7 +66,7 @@ query append it at the end of `db.rs` (append-only keeps merges trivial).
   CI: GitHub Actions in `archlinux:latest` container (fmt, clippy -D warnings, test), plus a job
   asserting `cargo tree -p vortex-core -e normal` contains no `gtk4|glib|gio|libadwaita`.
 - Deps: none.
-- Acceptance: CI green on the PR; `cargo run --bin vortex` shows the window on Wayland (manual
+- Acceptance: CI green on the PR; `cargo run --bin vortex-launcher` shows the window on Wayland (manual
   screenshot or `WAYLAND_DISPLAY` run noted in PR); `cargo test -p vortex-core` runs without GTK libs
   (CI job on plain `rust` image for core only).
 
@@ -284,6 +284,16 @@ marked PASS / FAIL / NOT RUN with evidence.
   falls back to header, no match records none, non-image and oversize rejected, setting off makes zero
   requests, custom image set/remove, cover deleted with the game, v1 DB migrates. `real_steam_lookup`
   (`--ignored`, network). Manual: covers appear in grid, list and game page.
+
+## M18: First-run tool check (sonnet)
+
+`runner::Tools::check` probes umu-run (configured path or `PATH`, no shell) and
+Proton runtimes (`runtime::discover`) and returns plain data (`ToolCheck`). The GTK shell runs it
+off the GTK thread at startup and shows banners (umu-run missing, no runtime)
+with a "Check again" button; the library stays usable. A spawn `NotFound` on umu-run displays an
+install hint instead of the raw I/O error.
+- Files: `runner.rs`, `error.rs`, `vortex-gtk/src/app.rs`, `docs/USER.md`, tests in `tests/tool_check.rs`.
+- Deps: M7, M11.
 
 ## Top risks (details: ARCHITECTURE section 14)
 

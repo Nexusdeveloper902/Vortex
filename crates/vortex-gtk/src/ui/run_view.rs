@@ -154,6 +154,9 @@ impl RunView {
         match ev {
             RunEvent::Phase(p) => {
                 self.status.set_subtitle(phase_label(*p));
+                // A new run (e.g. the installer after prefix creation) re-arms Stop; a previous
+                // run's Finished had disabled it.
+                self.stop_btn.set_sensitive(true);
                 self.mark_btn.set_sensitive(*p != Phase::Running);
             }
             RunEvent::Line { stream, text } => self.append(*stream, text),

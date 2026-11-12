@@ -587,6 +587,30 @@ fn mark_run_finished_while_waiting_for_children() {
 }
 
 #[test]
+fn cancel_while_waiting_for_children_stops_the_orphans() {
+    let Some(t) = fake() else { return };
+    let src = t.source("orphan cancel src", "orphan:30");
+    let s = t
+        .inst
+        .begin(t.req("Orphan Cancel", &src, "setup.exe"))
+        .unwrap();
+    let evs = drive(&s.events, LIMIT, |ev| {
+        if *ev == InstallEvent::State(InstallState::Waiting) {
+            t.inst.cancel(s.install_id).unwrap();
+        }
+    });
+    assert_eq!(
+        states(&evs).last(),
+        Some(&InstallState::Cancelled),
+        "{evs:?}"
+    );
+    assert!(run_outcome(&evs, RunKind::Install).unwrap().stopped);
+    for r in t.db().runs_for_game(s.game_id).unwrap() {
+        assert!(scan_marker(&r.marker).is_empty());
+    }
+}
+
+#[test]
 fn msi_runs_through_msiexec_with_windows_path() {
     let Some(t) = fake() else { return };
     let dir = t.root.join("msi src");

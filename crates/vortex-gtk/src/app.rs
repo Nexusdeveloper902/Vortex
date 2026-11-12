@@ -30,6 +30,8 @@ pub struct AppState {
     pub window: adw::ApplicationWindow,
     pub toasts: adw::ToastOverlay,
     pub nav: adw::NavigationView,
+    /// Set once the user chose to quit from a dialog that already asked; `quit_guard` lets go.
+    pub quit_now: std::cell::Cell<bool>,
 }
 
 impl AppState {
@@ -181,6 +183,7 @@ fn activate(app: &adw::Application, slot: &Slot) {
         window: window.clone(),
         toasts: toasts.clone(),
         nav: nav.clone(),
+        quit_now: Default::default(),
     });
     *slot.borrow_mut() = Some(state.clone());
     // Log retention, off the GTK thread (after recovery, so detached runs count as running).
@@ -192,6 +195,7 @@ fn activate(app: &adw::Application, slot: &Slot) {
         }
     });
     dialogs::quit_guard(&state);
+    dialogs::unfocus_entries(&state.window);
     install_actions(app, &state);
     if let Err(e) = recovered {
         state.toast(&e.to_string());

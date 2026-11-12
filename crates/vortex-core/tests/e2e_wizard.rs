@@ -106,6 +106,7 @@ struct World {
 
 impl World {
     fn new(root: PathBuf) -> World {
+        let _ = marker_processes(); // takes the baseline
         let paths = Paths::under(&root);
         let db = Arc::new(Mutex::new(Db::open(&paths.db_file()).unwrap()));
         let runs = Arc::new(Runs::new(paths.clone(), Tools::default(), db.clone()));
@@ -316,6 +317,20 @@ fn copy_tree(from: &Path, to: &Path) {
 
 /// Every process on the machine that carries a `VORTEX_RUN_ID` (any run, any test).
 fn marker_processes() -> Vec<String> {
+    // Markers that existed before the first World (another Vortex on this machine) are not ours.
+    static BASE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let first = BASE.get().is_none();
+    let base = BASE.get_or_init(raw_markers);
+    if first {
+        return Vec::new();
+    }
+    raw_markers()
+        .into_iter()
+        .filter(|p| !base.contains(p))
+        .collect()
+}
+
+fn raw_markers() -> Vec<String> {
     let mut v = Vec::new();
     for e in std::fs::read_dir("/proc").unwrap().flatten() {
         if let Ok(env) = std::fs::read(e.path().join("environ"))

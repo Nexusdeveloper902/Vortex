@@ -101,7 +101,9 @@ pub fn is_resting(s: InstallState) -> bool {
 /// One-line user text for a diagnostic finding, with its first evidence line.
 pub fn finding_text(f: &Finding) -> String {
     let what = match f.class {
-        Class::InstallerFailure => "The installer reported a failure.",
+        Class::InstallerFailure => {
+            "The installer exited with an error. If you cancelled it yourself, nothing was installed: close this window or Retry."
+        }
         Class::RuntimeInitFailure => "Proton could not initialise the environment.",
         Class::MissingDependency => {
             "A required component is missing. Try Manage dependencies on the game page."
@@ -356,12 +358,50 @@ pub fn join_names(names: &[String]) -> String {
     }
 }
 
+/// App-wide: a click on anything that is not a text field drops keyboard focus, and Escape in a
+/// text field drops focus instead of acting (a second Escape then closes the dialog as usual).
+/// Dialogs (including `adw::PreferencesDialog`) live in the window, so one controller covers all.
+pub fn unfocus_entries(window: &adw::ApplicationWindow) {
+    let click = gtk4::GestureClick::new();
+    click.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    click.connect_pressed(|g, _, x, y| {
+        let Some(win) = g.widget() else { return };
+        let Some(root) = win.root() else { return };
+        let mut hit = win.pick(x, y, gtk4::PickFlags::DEFAULT);
+        while let Some(h) = hit {
+            if h.is::<gtk4::Editable>() || h.is::<gtk4::Button>() {
+                return;
+            }
+            hit = h.parent();
+        }
+        // Clicks on empty space only; widgets that take focus themselves keep it.
+        if root.focus().is_some_and(|f| f.is::<gtk4::Text>()) {
+            root.set_focus(None::<&gtk4::Widget>);
+        }
+    });
+    window.add_controller(click);
+    let key = gtk4::EventControllerKey::new();
+    key.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    let win = window.clone();
+    key.connect_key_pressed(move |_, k, _, _| {
+        if k == gtk4::gdk::Key::Escape
+            && let Some(f) = gtk4::prelude::RootExt::focus(&win)
+            && f.is::<gtk4::Text>()
+        {
+            gtk4::prelude::GtkWindowExt::set_focus(&win, None::<&gtk4::Widget>);
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    window.add_controller(key);
+}
+
 /// Intercepts window close while runs or installs are active (keep running / stop all / cancel).
 pub fn quit_guard(state: &Rc<AppState>) {
     let force = Rc::new(std::cell::Cell::new(false));
     let st = state.clone();
     state.window.connect_close_request(move |w| {
-        if force.get() {
+        if force.get() || st.quit_now.get() {
             return glib::Propagation::Proceed;
         }
         let runs = st.db().active_runs().unwrap_or_default();

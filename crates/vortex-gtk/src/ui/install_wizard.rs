@@ -255,6 +255,13 @@ impl Wizard {
         self.dialog.connect_closed(move |_| {
             keep.take();
         });
+        // A busy dialog cannot close, and it also blocks the window's close request: ask instead
+        // of leaving the user with a window that will not quit.
+        let w = Rc::downgrade(self);
+        self.dialog.connect_close_attempt(move |_| {
+            up!(w);
+            w.confirm_quit();
+        });
         self.dialog.present(Some(&self.state.window));
     }
 
@@ -534,12 +541,28 @@ impl Wizard {
         col.append(&self.select);
         {
             let w = Rc::downgrade(self);
-            self.view.stop_btn.connect_clicked(move |b| {
+            self.view.stop_btn.connect_clicked(move |_| {
                 up!(w);
-                b.set_sensitive(false);
-                if let Err(e) = w.state.installs.cancel(w.install_id.get()) {
-                    w.state.toast(&e.to_string());
-                }
+                let d = adw::AlertDialog::new(
+                    Some("Cancel the install?"),
+                    Some("This stops the installer and every program it started in this prefix."),
+                );
+                d.add_response("no", "Keep installing");
+                d.add_response("yes", "Cancel install");
+                d.set_response_appearance("yes", adw::ResponseAppearance::Destructive);
+                d.set_default_response(Some("no"));
+                d.set_close_response("no");
+                let w2 = w.clone();
+                d.connect_response(None, move |_, id| {
+                    if id != "yes" {
+                        return;
+                    }
+                    w2.view.stop_btn.set_sensitive(false);
+                    if let Err(e) = w2.state.installs.cancel(w2.install_id.get()) {
+                        w2.state.toast(&e.to_string());
+                    }
+                });
+                d.present(Some(&w.dialog));
             });
             let w = Rc::downgrade(self);
             self.view.mark_btn.connect_clicked(move |_| {
@@ -584,6 +607,51 @@ impl Wizard {
         let p = step("Installing", &col, false);
         p.set_tag(Some("progress"));
         p
+    }
+
+    fn confirm_quit(self: &Rc<Self>) {
+        let d = adw::AlertDialog::new(
+            Some("An install is running"),
+            Some(
+                "Stop the installer and quit, or quit and leave it running? A run left running is picked up again on the next start.",
+            ),
+        );
+        d.add_response("cancel", "Cancel");
+        d.add_response("keep", "Quit and leave it running");
+        d.add_response("stop", "Stop the installer and quit");
+        d.set_response_appearance("stop", adw::ResponseAppearance::Destructive);
+        d.set_default_response(Some("cancel"));
+        d.set_close_response("cancel");
+        let w = self.clone();
+        d.connect_response(None, move |_, id| {
+            if id == "cancel" {
+                return;
+            }
+            let stop = id == "stop";
+            if stop {
+                let _ = w.state.installs.cancel(w.install_id.get());
+            }
+            let w = w.clone();
+            glib::spawn_future_local(async move {
+                if stop {
+                    let (installs, i) = (w.state.installs.clone(), w.install_id.get());
+                    let _ = blocking(move || {
+                        for _ in 0..60 {
+                            if !installs.is_active(i) {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                        }
+                    })
+                    .await;
+                }
+                w.state.quit_now.set(true);
+                w.dialog.set_can_close(true);
+                w.dialog.force_close();
+                w.state.window.close();
+            });
+        });
+        d.present(Some(&self.dialog));
     }
 
     fn show_state(self: &Rc<Self>, s: InstallState, cands: &[ExeCandidate]) {

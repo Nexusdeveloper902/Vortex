@@ -192,6 +192,14 @@ match. It is disabled in offline mode. Turn offline mode off in **Preferences** 
 A backup contains the prefix only. Install folders that Vortex created under its `games` folder, and
 installer sources, are not included.
 
+## Installing and removing games
+
+- **Install:** the "Install Game" button in the library header (Ctrl+N). **Add an existing game:**
+  the "+" menu in the sidebar, or Ctrl+Shift+N.
+- **Remove:** right-click (or long-press) a game in the library and choose "Remove completely...",
+  select a game and press Delete, or use "Remove..." under "Manage" at the bottom of its page. Vortex
+  always shows the deletion plan first; nothing is deleted until you confirm.
+
 ## Uninstall and remove
 
 Vortex has two different removal actions. The overflow menu on the game page holds both.

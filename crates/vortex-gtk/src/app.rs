@@ -221,6 +221,19 @@ fn activate(app: &adw::Application, slot: &Slot) {
     let content_header = adw::HeaderBar::new();
     content_header.set_title_widget(Some(&title));
     content_header.pack_start(&search);
+    content_header.pack_start(
+        &gtk4::Button::builder()
+            .child(
+                &adw::ButtonContent::builder()
+                    .icon_name("list-add-symbolic")
+                    .label("Install Game")
+                    .build(),
+            )
+            .action_name("win.install-game")
+            .tooltip_text("Install a game (Ctrl+N)")
+            .css_classes(["suggested-action"])
+            .build(),
+    );
     content_header.pack_end(&library.list_toggle);
     content_header.pack_end(&library.sort);
     let content_view = adw::ToolbarView::new();
@@ -388,6 +401,8 @@ fn install_actions(app: &adw::Application, state: &Rc<AppState>) {
         );
     }
     app.set_accels_for_action("win.preferences", &["<primary>comma"]);
+    app.set_accels_for_action("win.install-game", &["<primary>n"]);
+    app.set_accels_for_action("win.add-existing", &["<primary><shift>n"]);
 }
 
 /// Startup tool check (M18): banners above the split view, re-checked by "Check again".

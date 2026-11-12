@@ -193,6 +193,25 @@ fn build(state: &Rc<AppState>, id: i64) -> vortex_core::error::Result<adw::Navig
     col.append(&hero(state, &g, env.id));
     col.append(&secondary(state, &g, &env));
     col.append(&prefs);
+    let manage_group = adw::PreferencesGroup::builder()
+        .title("Manage")
+        .margin_top(12)
+        .margin_bottom(24)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+    let rm = gtk4::Button::builder()
+        .label("Remove...")
+        .halign(gtk4::Align::Start)
+        .tooltip_text("Remove this game completely (shows what will be deleted first)")
+        .css_classes(["destructive-action"])
+        .build();
+    {
+        let (state, id) = (state.clone(), g.id);
+        rm.connect_clicked(move |_| manage::remove_completely(&state, id));
+    }
+    manage_group.add(&rm);
+    col.append(&manage_group);
     let clamp = adw::Clamp::builder().maximum_size(760).child(&col).build();
     view.set_content(Some(&gtk4::ScrolledWindow::builder().child(&clamp).build()));
     Ok(adw::NavigationPage::new(&view, &g.name))

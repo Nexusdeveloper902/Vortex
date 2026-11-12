@@ -81,7 +81,7 @@ pub struct Library {
 }
 
 impl Library {
-    pub fn new(_state: &Rc<AppState>) -> Self {
+    pub fn new(state: &Rc<AppState>) -> Self {
         let store = gio::ListStore::new::<GameObject>();
         let entry = gtk4::SearchEntry::builder()
             .placeholder_text("Search games")
@@ -137,12 +137,19 @@ impl Library {
 
         let filtered = gtk4::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
         let sorted = gtk4::SortListModel::new(Some(filtered.clone()), Some(sorter));
-        let selection = gtk4::NoSelection::new(Some(sorted));
+        let selection = gtk4::SingleSelection::new(Some(sorted));
+        selection.set_autoselect(false);
+        selection.set_can_unselect(true);
 
         let grid_factory = gtk4::SignalListItemFactory::new();
-        grid_factory.connect_setup(|_, item| {
-            if let Some(item) = item.downcast_ref::<gtk4::ListItem>() {
-                item.set_child(Some(&gtk4::Box::new(gtk4::Orientation::Vertical, 6)));
+        grid_factory.connect_setup({
+            let state = state.clone();
+            move |_, item| {
+                if let Some(item) = item.downcast_ref::<gtk4::ListItem>() {
+                    let b = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+                    attach_menu(&b, item, &state);
+                    item.set_child(Some(&b));
+                }
             }
         });
         grid_factory.connect_bind(|_, item| {
@@ -157,9 +164,14 @@ impl Library {
             }
         });
         let list_factory = gtk4::SignalListItemFactory::new();
-        list_factory.connect_setup(|_, item| {
-            if let Some(item) = item.downcast_ref::<gtk4::ListItem>() {
-                item.set_child(Some(&gtk4::Box::new(gtk4::Orientation::Horizontal, 12)));
+        list_factory.connect_setup({
+            let state = state.clone();
+            move |_, item| {
+                if let Some(item) = item.downcast_ref::<gtk4::ListItem>() {
+                    let b = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+                    attach_menu(&b, item, &state);
+                    item.set_child(Some(&b));
+                }
             }
         });
         list_factory.connect_bind(|_, item| {
@@ -213,6 +225,23 @@ impl Library {
             grid.connect_activate(move |g, pos| a(g.model().map(|m| m.upcast()), pos));
         }
         list.connect_activate(move |l, pos| activate(l.model().map(|m| m.upcast()), pos));
+
+        // Delete on the focused tile starts the same remove flow (plan dialog included).
+        let del = |sel: gtk4::SingleSelection, state: Rc<AppState>| {
+            let k = gtk4::EventControllerKey::new();
+            k.connect_key_pressed(move |_, key, _, _| {
+                if key != gtk4::gdk::Key::Delete {
+                    return glib::Propagation::Proceed;
+                }
+                if let Some(o) = sel.selected_item().and_downcast::<GameObject>() {
+                    crate::ui::manage::remove_completely(&state, o.id());
+                }
+                glib::Propagation::Stop
+            });
+            k
+        };
+        grid.add_controller(del(selection.clone(), state.clone()));
+        list.add_controller(del(selection.clone(), state.clone()));
 
         let empty = adw::StatusPage::builder()
             .icon_name("applications-games-symbolic")
@@ -377,6 +406,56 @@ fn clear(b: &gtk4::Box) {
     while let Some(c) = b.first_child() {
         b.remove(&c);
     }
+}
+
+/// Right-click or long-press menu on a tile: Play, Open game page, Remove completely.
+fn attach_menu(b: &gtk4::Box, item: &gtk4::ListItem, state: &Rc<AppState>) {
+    let group = gio::SimpleActionGroup::new();
+    type Act = fn(&Rc<AppState>, i64);
+    let acts: [(&str, Act); 3] = [
+        ("play", crate::ui::game_page::open_and_play),
+        ("open", crate::ui::game_page::open),
+        ("remove", crate::ui::manage::remove_completely),
+    ];
+    for (name, f) in acts {
+        let a = gio::SimpleAction::new(name, None);
+        let (item, state) = (item.clone(), state.clone());
+        a.connect_activate(move |_, _| {
+            if let Some(o) = item.item().and_downcast::<GameObject>() {
+                f(&state, o.id());
+            }
+        });
+        group.add_action(&a);
+    }
+    b.insert_action_group("tile", Some(&group));
+    let menu = gio::Menu::new();
+    menu.append(Some("Play"), Some("tile.play"));
+    menu.append(Some("Open game page"), Some("tile.open"));
+    menu.append(Some("Remove completely..."), Some("tile.remove"));
+    let pop = gtk4::PopoverMenu::from_model(Some(&menu));
+    pop.set_parent(b);
+    pop.set_has_arrow(false);
+    b.connect_destroy({
+        let pop = pop.clone();
+        move |_| pop.unparent()
+    });
+    let show = Rc::new(move |x: f64, y: f64| {
+        pop.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        pop.popup();
+    });
+    let click = gtk4::GestureClick::builder().button(3).build();
+    let s2 = show.clone();
+    click.connect_pressed(move |g, _, x, y| {
+        g.set_state(gtk4::EventSequenceState::Claimed);
+        s2(x, y);
+    });
+    b.add_controller(click);
+    let press = gtk4::GestureLongPress::new();
+    press.connect_pressed(move |g, x, y| {
+        g.set_state(gtk4::EventSequenceState::Claimed);
+        show(x, y);
+    });
+    b.add_controller(press);
 }
 
 fn fill_tile(b: &gtk4::Box, g: &GameObject) {

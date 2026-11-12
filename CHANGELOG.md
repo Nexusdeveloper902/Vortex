@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/Nexusdeveloper902/Vortex/compare/v1.0.0...v1.0.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* first-use fixes (M29, 1.0.1) ([#60](https://github.com/Nexusdeveloper902/Vortex/issues/60)) ([2e19f49](https://github.com/Nexusdeveloper902/Vortex/commit/2e19f492f9ec8669e0a23b9ad78e10e02b0c9a75))
+* **gtk/library:** make install and remove discoverable ([#62](https://github.com/Nexusdeveloper902/Vortex/issues/62)) ([2ca9c8a](https://github.com/Nexusdeveloper902/Vortex/commit/2ca9c8af0928eefc7fcf5c451251b753fa50f921))
+
 ## [1.0.0](https://github.com/Nexusdeveloper902/Vortex/compare/v0.4.0...v1.0.0) (2026-11-11)
 
 
